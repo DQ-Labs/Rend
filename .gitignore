@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+dist/
+build/
+*.spec
+ffmpeg.exe
+ffprobe.exe
+demucs_source/
+*_stems/
+*.mp3
+*.wav
+*.flac
