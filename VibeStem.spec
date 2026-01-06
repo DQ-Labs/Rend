@@ -3,9 +3,9 @@
 
 a = Analysis(
     ['app.py'],
-    pathex=[],
+    pathex=['.', 'demucs_source'],
     binaries=[('ffmpeg.exe', '.'), ('ffprobe.exe', '.')],
-    datas=[],
+    datas=[('demucs_source/demucs', 'demucs')],
     hiddenimports=['demucs', 'demucs.api', 'demucs.htdemucs', 'demucs.apply', 'demucs.audio', 'demucs.pretrained', 'demucs.repo', 'soundfile', 'sklearn.utils._typedefs'],
     hookspath=[],
     hooksconfig={},

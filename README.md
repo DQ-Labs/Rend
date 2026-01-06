@@ -43,20 +43,32 @@ python app.py
 - Select an input audio file.
 - The stems will be saved in the output directory (default: `separated/` or similar relative path).
 
+## Architecture
+- **Local Demucs Source**: The project relies on a local copy of the `demucs` library located in the `demucs_source` folder. This requires an editable install (`pip install -e .`) to function correctly with custom modifications.
+- **Dependency Management**: Critical dependencies like `torch` and `soundfile` must be compatible with the system Python version (Python 3.11/3.12 recommended).
+
 ## Building from Source
 
 To create a standalone EXE file using PyInstaller:
 
-1. Ensure `pyinstaller` is installed:
+1. **Requirements**: 
+   - Ensure `ffmpeg.exe` and `ffprobe.exe` are in the root directory.
+   - Activate your virtual environment.
+
+2. **Build Command**:
+   Run the following command to build the executable using the pre-configured spec file:
    ```bash
-   pip install pyinstaller
+   pyinstaller VibeStem.spec --clean --noconfirm
    ```
 
-2. Run the build command using the provided spec file:
-   ```bash
-   pyinstaller VibeStem.spec
-   ```
-   This will use `VibeStem.spec` which is configured to:
-   - Include `ffmpeg.exe` and `ffprobe.exe`.
-   - Handle hidden imports for Demucs and Soundfile.
+   **Make sure to run this via your virtual environment's Python** (e.g., `.\venv\Scripts\python.exe -m PyInstaller ...`) if you have multiple Python versions installed.
+
+   The `VibeStem.spec` file is configured to:
+   - Include `demucs_source` in the path and data bundle.
+   - Bundle `ffmpeg.exe` and `ffprobe.exe` binaries.
+   - Handle hidden imports for `demucs` and `soundfile`.
    - Create a single-file executable (`dist/VibeStem.exe`).
+
+## Known Behavior
+- **Launch Time**: The final `.exe` takes approximately **30 seconds to launch**. This is normal behavior for a PyInstaller "one-file" build as it unpacks temporary files to a runtime directory.
+- **First Run**: On the very first separation, the application will automatically download the necessary AI models. This requires an internet connection and may take some time depending on your speed. Subsequent runs will be offline.

@@ -11,11 +11,13 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 class SeparationThread(threading.Thread):
-    def __init__(self, input_file, output_folder, model_name, callback):
+    def __init__(self, input_file, output_folder, model_name, shifts, two_stems, callback):
         super().__init__()
         self.input_file = input_file
         self.output_folder = output_folder
         self.model_name = model_name
+        self.shifts = shifts
+        self.two_stems = two_stems
         self.callback = callback
 
     def run(self):
@@ -31,14 +33,30 @@ class SeparationThread(threading.Thread):
             )
 
             # 2. Start Separation
-            self.callback("Loading model... (First run takes time)", 0.1)
-            origin, separated = separator.separate_audio_file(self.input_file)
+            self.callback(f"Loading {self.model_name}... (First run takes time)", 0.1)
+            # shifts=1 is default, >1 is slower but better
+            origin, separated = separator.separate_audio_file(self.input_file, shifts=self.shifts)
 
             # 3. Save the Stems
             self.callback("Saving WAV files...", 0.9)
             os.makedirs(self.output_folder, exist_ok=True)
             
             # Manually save as WAV to avoid triggering any internal MP3 calls
+            # Manually save as WAV to avoid triggering any internal MP3 calls
+            
+            # Karaoke Mode: If two_stems is True, we want "vocals" and "accompaniment"
+            # Demucs (4-source) returns: drums, bass, other, vocals
+            
+            if self.two_stems:
+                # Combine everything except vocals into "accompaniment"
+                vocals = separated.pop("vocals")
+                accompaniment = torch.zeros_like(vocals)
+                for stem, source in separated.items():
+                    accompaniment += source
+                
+                # Overwrite separated dict to only have these two
+                separated = {"vocals": vocals, "accompaniment": accompaniment}
+
             for stem, source in separated.items():
                 filename = f"{stem}.wav"
                 filepath = os.path.join(self.output_folder, filename)
@@ -60,7 +78,8 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Rend")
-        self.geometry("600x500")
+        self.title("Rend")
+        self.geometry("600x650")
         self.resizable(False, False)
         self.file_path = None
         
@@ -94,6 +113,30 @@ class App(ctk.CTk):
         self.lbl_file = ctk.CTkLabel(self, text="No file selected", text_color="#666666")
         self.lbl_file.grid(row=3, column=0, pady=5)
 
+        # Options Frame
+        self.frm_options = ctk.CTkFrame(self, fg_color="transparent")
+        self.frm_options.grid(row=4, column=0, pady=10)
+
+        # Model Selection
+        self.lbl_model = ctk.CTkLabel(self.frm_options, text="Model:", font=("Roboto", 12))
+        self.lbl_model.grid(row=0, column=0, padx=10, sticky="e")
+        
+        self.opt_model = ctk.CTkOptionMenu(
+            self.frm_options, 
+            values=["htdemucs", "htdemucs_ft", "htdemucs_6s", "hdemucs_mmi", "mdx", "mdx_extra", "mdx_q"],
+            width=140
+        )
+        self.opt_model.grid(row=0, column=1, padx=10, sticky="w")
+        self.opt_model.set("htdemucs")
+
+        # Quality Checkbox
+        self.chk_quality = ctk.CTkCheckBox(self.frm_options, text="High Quality (Slow)")
+        self.chk_quality.grid(row=1, column=0, columnspan=2, pady=(10, 5))
+        
+        # Karaoke Checkbox
+        self.chk_karaoke = ctk.CTkCheckBox(self.frm_options, text="Karaoke Mode (2-Stems)")
+        self.chk_karaoke.grid(row=2, column=0, columnspan=2, pady=5)
+
         # Run Button
         self.btn_run = ctk.CTkButton(
             self, 
@@ -108,15 +151,14 @@ class App(ctk.CTk):
             text_color="white",
             corner_radius=25
         )
-        self.btn_run.grid(row=4, column=0, pady=30)
+        self.btn_run.grid(row=5, column=0, pady=20)
 
         # Progress
         self.lbl_status = ctk.CTkLabel(self, text="Ready", text_color="#888888")
-        self.lbl_status.grid(row=5, column=0, sticky="s", pady=(0, 10))
+        self.lbl_status.grid(row=6, column=0, sticky="s", pady=(0, 10))
         
         self.progress_bar = ctk.CTkProgressBar(self, width=500, progress_color="#6C5CE7")
-        self.progress_bar.grid(row=6, column=0, pady=(0, 40))
-        self.progress_bar.set(0)
+        self.progress_bar.grid(row=7, column=0, pady=(0, 40))
 
     def select_file(self):
         file = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.wav *.flac")])
@@ -136,10 +178,17 @@ class App(ctk.CTk):
         folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
         output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
 
+        # Get Options
+        model = self.opt_model.get()
+        shifts = 2 if self.chk_quality.get() == 1 else 1
+        two_stems = True if self.chk_karaoke.get() == 1 else False
+
         self.worker = SeparationThread(
             input_file=self.file_path,
             output_folder=output_dir,
-            model_name="htdemucs", 
+            model_name=model,
+            shifts=shifts,
+            two_stems=two_stems, 
             callback=self.update_ui
         )
         self.worker.start()
@@ -161,6 +210,9 @@ class App(ctk.CTk):
     def reset_ui(self):
         self.btn_run.configure(state="normal")
         self.btn_select.configure(state="normal")
+        self.chk_quality.configure(state="normal")
+        self.chk_karaoke.configure(state="normal")
+        self.opt_model.configure(state="normal")
 
 if __name__ == "__main__":
     app = App()
