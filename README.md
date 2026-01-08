@@ -30,12 +30,11 @@ A simple Windows GUI for AI Music Stem Separation (Demucs) built with CustomTkin
    .\venv\Scripts\activate
    ```
 
-3. Install dependencies (including local Demucs source):
-   ```bash
-   pip install -r requirements.txt
-   pip install -e ./demucs_source
+3. Install dependencies using the automated setup script:
+   ```powershell
+   .\setup_dev.ps1
    ```
-   *(Note: Ensure `customtkinter`, `soundfile`, and other requirements are installed effectively)*
+   *This script patches the local Demucs copy for Windows compatibility and installs all requirements.*
 
 ## Usage
 
