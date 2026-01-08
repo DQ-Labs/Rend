@@ -1,11 +1,21 @@
 import os
 import sys
 import threading
+import webbrowser
+import socket
+import subprocess
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import demucs.api
 import torch
 import soundfile as sf
+
+try:
+    import pyi_splash
+    # Update the text on the splash screen
+    pyi_splash.update_text('Initializing AI Models...')
+except Exception:
+    pass
 
 # Fix Console Crash: Redirect stdout/stderr if None (happens in --noconsole mode)
 class DummyStream:
@@ -28,6 +38,16 @@ if getattr(sys, 'frozen', False):
 # Force Dark Mode and Blue Theme
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 class SeparationThread(threading.Thread):
     def __init__(self, input_file, output_folder, model_name, shifts, two_stems, callback):
@@ -98,10 +118,24 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Rend")
-        self.title("Rend")
         self.geometry("600x650")
         self.resizable(False, False)
+        # Icon Setup (Handle Exception if icon is missing relative to script)
+        try:
+             self.iconbitmap(resource_path("rend.ico"))
+        except Exception:
+             pass
+
         self.file_path = None
+
+        self.MODEL_INFO = {
+            "htdemucs": "The Default. Balanced speed and quality. (Like a sedan).",
+            "htdemucs_ft": "Fine-Tuned. Slightly better vocals, but 4x slower. (Like a sports car).",
+            "htdemucs_6s": "Experimental. Splits 6 stems: Drums, Bass, Vocals, Guitar, Piano, Other.",
+            "mdx": "Classic Model. Trained on MusDB HQ. Good baseline.",
+            "mdx_extra": "High Precision. Uses extra training data. Good for complex songs.",
+            "mdx_q": "Quantized. Smaller download size, slightly lower quality. (Like a city car)."
+        }
         
         # Grid Layout
         self.grid_columnconfigure(0, weight=1)
@@ -143,19 +177,30 @@ class App(ctk.CTk):
         
         self.opt_model = ctk.CTkOptionMenu(
             self.frm_options, 
-            values=["htdemucs", "htdemucs_ft", "htdemucs_6s", "hdemucs_mmi", "mdx", "mdx_extra", "mdx_q"],
-            width=140
+            values=["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx", "mdx_extra", "mdx_q"],
+            width=140,
+            command=self.update_model_desc
         )
         self.opt_model.grid(row=0, column=1, padx=10, sticky="w")
         self.opt_model.set("htdemucs")
 
+        # Model Description
+        self.lbl_model_desc = ctk.CTkLabel(
+            self.frm_options, 
+            text=self.MODEL_INFO["htdemucs"], 
+            text_color="gray", 
+            font=("Roboto", 12),
+            wraplength=350
+        )
+        self.lbl_model_desc.grid(row=1, column=0, columnspan=2, pady=(5, 10))
+
         # Quality Checkbox
         self.chk_quality = ctk.CTkCheckBox(self.frm_options, text="High Quality (Slow)")
-        self.chk_quality.grid(row=1, column=0, columnspan=2, pady=(10, 5))
+        self.chk_quality.grid(row=2, column=0, columnspan=2, pady=(10, 5))
         
         # Karaoke Checkbox
         self.chk_karaoke = ctk.CTkCheckBox(self.frm_options, text="Karaoke Mode (2-Stems)")
-        self.chk_karaoke.grid(row=2, column=0, columnspan=2, pady=5)
+        self.chk_karaoke.grid(row=3, column=0, columnspan=2, pady=5)
 
         # Run Button
         self.btn_run = ctk.CTkButton(
@@ -178,7 +223,84 @@ class App(ctk.CTk):
         self.lbl_status.grid(row=6, column=0, sticky="s", pady=(0, 10))
         
         self.progress_bar = ctk.CTkProgressBar(self, width=500, progress_color="#6C5CE7")
-        self.progress_bar.grid(row=7, column=0, pady=(0, 40))
+        self.progress_bar.grid(row=7, column=0, pady=(0, 20))
+
+        # Status Bar
+        self.frm_status = ctk.CTkFrame(self, fg_color="transparent")
+        self.frm_status.grid(row=8, column=0, sticky="ew", padx=20, pady=(0, 10))
+        self.frm_status.grid_columnconfigure(1, weight=1)
+
+        self.lbl_ffmpeg = ctk.CTkLabel(self.frm_status, text="● FFmpeg", text_color="gray", font=("Roboto", 12))
+        self.lbl_ffmpeg.grid(row=0, column=0, padx=(0, 10))
+
+        self.lbl_online = ctk.CTkLabel(self.frm_status, text="● Online", text_color="gray", font=("Roboto", 12))
+        self.lbl_online.grid(row=0, column=1, sticky="w")
+
+        self.lbl_attribution = ctk.CTkLabel(
+            self.frm_status, 
+            text="Powered by Demucs", 
+            text_color="#00FFFF",  # Cyan
+            font=("Roboto", 12), 
+            cursor="hand2"
+        )
+        self.lbl_attribution.grid(row=0, column=2, sticky="e")
+        self.lbl_attribution.bind("<Button-1>", self.open_attribution)
+
+        try:
+            import pyi_splash
+            pyi_splash.close()
+        except Exception:
+            pass
+
+        # Start Pre-Flight Check
+        threading.Thread(target=self.run_diagnostics, daemon=True).start()
+
+    def run_diagnostics(self):
+        # 1. Check FFmpeg
+        ffmpeg_ok = False
+        try:
+            # Prevent black window popping up on Windows
+            startupinfo = None
+            creationflags = 0
+            if os.name == 'nt':
+                creationflags = subprocess.CREATE_NO_WINDOW
+
+            subprocess.run(
+                ["ffmpeg", "-version"], 
+                check=True, 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags
+            )
+            ffmpeg_ok = True
+        except Exception:
+            ffmpeg_ok = False
+
+        # 2. Check Internet
+        online_ok = False
+        try:
+            # Connect to Google DNS or Web to verify
+            socket.create_connection(("www.google.com", 80), timeout=3)
+            online_ok = True
+        except OSError:
+            online_ok = False
+
+        # Schedule UI Update on Main Thread
+        self.after(1000, lambda: self.update_status_lights(ffmpeg_ok, online_ok))
+
+    def update_status_lights(self, ffmpeg_ok, online_ok):
+        if ffmpeg_ok:
+            self.lbl_ffmpeg.configure(text_color="#00FF00") # Green
+        else:
+            self.lbl_ffmpeg.configure(text_color="#FF0000") # Red
+        
+        if online_ok:
+            self.lbl_online.configure(text_color="#00FF00") # Green
+        else:
+            self.lbl_online.configure(text_color="#FFA500") # Orange
+
+    def open_attribution(self, event):
+        webbrowser.open("https://github.com/adefossez/demucs")
 
     def select_file(self):
         file = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.wav *.flac")])
@@ -233,6 +355,10 @@ class App(ctk.CTk):
         self.chk_quality.configure(state="normal")
         self.chk_karaoke.configure(state="normal")
         self.opt_model.configure(state="normal")
+
+    def update_model_desc(self, choice):
+        description = self.MODEL_INFO.get(choice, "")
+        self.lbl_model_desc.configure(text=description)
 
 if __name__ == "__main__":
     app = App()

@@ -1,4 +1,4 @@
-# Rend (VibeStem)
+# Rend
 
 A simple Windows GUI for AI Music Stem Separation (Demucs) built with CustomTkinter.
 
@@ -20,8 +20,8 @@ A simple Windows GUI for AI Music Stem Separation (Demucs) built with CustomTkin
 ### Setup
 1. Clone the repository:
    ```bash
-   git clone https://github.com/DQ-Labs/VibeStem.git
-   cd VibeStem
+   git clone https://github.com/DQ-Labs/Rend.git
+   cd Rend
    ```
 
 2. Create and activate a virtual environment:
@@ -61,16 +61,16 @@ To create a standalone EXE file using PyInstaller:
 2. **Build Command**:
    Run the following command to build the executable using the pre-configured spec file:
    ```bash
-   pyinstaller VibeStem.spec --clean --noconfirm
+   pyinstaller Rend.spec --clean --noconfirm
    ```
 
    **Make sure to run this via your virtual environment's Python** (e.g., `.\venv\Scripts\python.exe -m PyInstaller ...`) if you have multiple Python versions installed.
 
-   The `VibeStem.spec` file is configured to:
+   The `Rend.spec` file is configured to:
    - Include `demucs_source` in the path and data bundle.
    - Bundle `ffmpeg.exe` and `ffprobe.exe` binaries.
    - Handle hidden imports for `demucs` and `soundfile`.
-   - Create a single-file executable (`dist/VibeStem.exe`).
+   - Create a single-file executable (`dist/Rend.exe`).
 
 ## Known Behavior
 - **Launch Time**: The final `.exe` takes approximately **30 seconds to launch**. This is normal behavior for a PyInstaller "one-file" build as it unpacks temporary files to a runtime directory.
