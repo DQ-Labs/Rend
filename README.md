@@ -4,6 +4,9 @@ A simple Windows GUI for AI Music Stem Separation (Demucs) built with CustomTkin
 
 ## Features
 - **Offline CPU Execution**: Uses `demucs` (htdemucs) for processing without requiring a GPU or internet connection for inference (after model download).
+- **Model Selection**: Choose between `htdemucs` (Default) and `mdx` (Extra) models.
+- **High Quality Mode**: Enable `shifts=2` for better separation quality (processed slightly slower).
+- **Karaoke Mode**: Automatic 2-stem output merging stems into 'Vocals' vs 'Backing'.
 - **WAV Export**: Saves separated stems directly as WAV files using `soundfile`.
 - **Dark Mode GUI**: Clean and modern interface powered by `customtkinter`.
 - **Threaded Processing**: Keeps the UI responsive during separation.
@@ -72,3 +75,4 @@ To create a standalone EXE file using PyInstaller:
 ## Known Behavior
 - **Launch Time**: The final `.exe` takes approximately **30 seconds to launch**. This is normal behavior for a PyInstaller "one-file" build as it unpacks temporary files to a runtime directory.
 - **First Run**: On the very first separation, the application will automatically download the necessary AI models. This requires an internet connection and may take some time depending on your speed. Subsequent runs will be offline.
+- **Troubleshooting**: If you previously encountered NumPy errors during packaging, these have been addressed in the latest build spec (v1.1+).

@@ -1,10 +1,29 @@
 import os
+import sys
 import threading
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import demucs.api
 import torch
 import soundfile as sf
+
+# Fix Console Crash: Redirect stdout/stderr if None (happens in --noconsole mode)
+class DummyStream:
+    def write(self, text):
+        pass
+    def flush(self):
+        pass
+
+if sys.stdout is None:
+    sys.stdout = DummyStream()
+if sys.stderr is None:
+    sys.stderr = DummyStream()
+
+# Fix FFmpeg Path: Add PyInstaller's temp directory to PATH when frozen
+if getattr(sys, 'frozen', False):
+    # Running as compiled executable
+    bundle_dir = sys._MEIPASS
+    os.environ["PATH"] = bundle_dir + os.pathsep + os.environ.get("PATH", "")
 
 # Force Dark Mode and Blue Theme
 ctk.set_appearance_mode("Dark")
@@ -25,17 +44,18 @@ class SeparationThread(threading.Thread):
             # 1. Configure the Separator
             # device="cpu" is safer for compatibility.
             # We explicitly do NOT ask for MP3 support here to avoid the missing library crash.
+            # shifts=1 is default, >1 is slower but better quality
             separator = demucs.api.Separator(
                 model=self.model_name,
                 device="cpu",
+                shifts=self.shifts,
                 progress=True,
                 callback=self.handle_progress
             )
 
             # 2. Start Separation
             self.callback(f"Loading {self.model_name}... (First run takes time)", 0.1)
-            # shifts=1 is default, >1 is slower but better
-            origin, separated = separator.separate_audio_file(self.input_file, shifts=self.shifts)
+            origin, separated = separator.separate_audio_file(self.input_file)
 
             # 3. Save the Stems
             self.callback("Saving WAV files...", 0.9)
