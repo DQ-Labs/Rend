@@ -1,8 +1,9 @@
-name: Build Rend
+name: Build and Release Rend
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   release:
     types: [created]
 
@@ -11,50 +12,68 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Install FFmpeg
-      run: |
-        Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile "ffmpeg.zip"
-        Expand-Archive ffmpeg.zip -DestinationPath .
-        Move-Item .\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe .
-        Move-Item .\ffmpeg-master-latest-win64-gpl\bin\ffprobe.exe .
-        Remove-Item -Recurse -Force ffmpeg-master-latest-win64-gpl
-        Remove-Item ffmpeg.zip
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
+          Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_temp"
+          $ffmpegExe = Get-ChildItem -Path "ffmpeg_temp" -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
+          $ffprobeExe = Get-ChildItem -Path "ffmpeg_temp" -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+          Copy-Item -Path $ffmpegExe.FullName -Destination ".\ffmpeg.exe"
+          Copy-Item -Path $ffprobeExe.FullName -Destination ".\ffprobe.exe"
+          Remove-Item -Path "ffmpeg.zip"
+          Remove-Item -Path "ffmpeg_temp" -Recurse
 
-    - name: Setup Demucs Source
-      run: |
-        git clone https://github.com/facebookresearch/demucs.git demucs_source
-        
-        # Patch requirements_minimal.txt
-        $reqFile = "demucs_source/requirements_minimal.txt"
-        $content = Get-Content $reqFile
-        $content = $content | Where-Object { $_ -notmatch "lameenc" -and $_ -notmatch "torchaudio" }
-        Set-Content -Path $reqFile -Value $content
+      - name: Prepare Demucs Source
+        shell: pwsh
+        run: |
+          git clone https://github.com/facebookresearch/demucs.git demucs_source
+          
+          # Patch requirements_minimal.txt
+          $reqFile = "demucs_source/requirements_minimal.txt"
+          if (Test-Path $reqFile) {
+              Write-Host "Patching $reqFile..."
+              $content = Get-Content $reqFile
+              $content = $content | Where-Object { $_ -notmatch "lameenc" -and $_ -notmatch "torchaudio" }
+              Set-Content -Path $reqFile -Value $content
+          }
 
-        # Patch audio.py to fix lameenc import for Windows
-        $audioFile = "demucs_source/demucs/audio.py"
-        $audioContent = Get-Content $audioFile -Raw
-        $audioContent = $audioContent -replace "import lameenc", "try:`r`n    import lameenc`r`nexcept ImportError:`r`n    pass"
-        Set-Content -Path $audioFile -Value $audioContent
+          # Patch audio.py
+          $audioFile = "demucs_source/demucs/audio.py"
+          if (Test-Path $audioFile) {
+              Write-Host "Patching $audioFile..."
+              $audioContent = Get-Content $audioFile -Raw
+              $audioContent = $audioContent -replace "import lameenc", "try:`r`n    import lameenc`r`nexcept ImportError:`r`n    lameenc = None"
+              Set-Content -Path $audioFile -Value $audioContent
+          }
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller customtkinter soundfile
-        pip install -e ./demucs_source
+      - name: Install Dependencies
+        run: |
+          pip install customtkinter pyinstaller soundfile
+          pip install -e ./demucs_source
 
-    - name: Build Executable
-      run: |
-        pyinstaller Rend.spec
+      - name: Build EXE
+        run: |
+          pyinstaller Rend.spec
 
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: Rend-Windows-Exe
-        path: dist/Rend.exe
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rend-Windows-Exe
+          path: dist/Rend.exe
+
+      - name: Upload Release Asset
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/Rend.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
