@@ -11,6 +11,10 @@ A simple Windows GUI for AI Music Stem Separation (Demucs) built with CustomTkin
 - **Dark Mode GUI**: Clean and modern interface powered by `customtkinter`.
 - **Threaded Processing**: Keeps the UI responsive during separation.
 
+## Downloads
+
+**Windows users can download the latest standalone executable (no Python required) from the [Releases Page](https://github.com/DQ-Labs/Rend/releases).**
+
 ## Installation
 
 ### Prerequisites
