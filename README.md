@@ -96,3 +96,15 @@ To create a standalone EXE file using PyInstaller:
 - **Launch Time**: The `.exe` takes approximately **30 seconds to launch**. This is normal for a PyInstaller one-file build as it unpacks to a temporary runtime directory on first launch.
 - **First Run**: On the very first separation, the app will automatically download the necessary AI model weights. This requires an internet connection and may take a few minutes. Subsequent runs are fully offline.
 - **Windows SmartScreen**: Because the executable is unsigned, Windows may show a SmartScreen warning on first launch. Click "More info" → "Run anyway" to proceed.
+
+## Troubleshooting
+
+### Red FFmpeg indicator
+
+![Rend showing a red FFmpeg status dot](assets/ffmpeg-error.png)
+
+If the **● FFmpeg** dot in the bottom-left is **red**, the app cannot find `ffmpeg.exe` on your system PATH or in the project root.
+
+**This only affects source installs.** The standalone `.exe` from the [Releases Page](https://github.com/DQ-Labs/Rend/releases) bundles FFmpeg automatically — no action needed.
+
+If you are running from source, place `ffmpeg.exe` and `ffprobe.exe` in the project root directory (alongside `app.py`) and restart the app. FFmpeg builds for Windows are available at [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/).
