@@ -82,7 +82,6 @@ class SeparationThread(threading.Thread):
             os.makedirs(self.output_folder, exist_ok=True)
             
             # Manually save as WAV to avoid triggering any internal MP3 calls
-            # Manually save as WAV to avoid triggering any internal MP3 calls
             
             # Karaoke Mode: If two_stems is True, we want "vocals" and "accompaniment"
             # Demucs (4-source) returns: drums, bass, other, vocals
@@ -122,9 +121,9 @@ class App(ctk.CTk):
         self.resizable(False, False)
         # Icon Setup (Handle Exception if icon is missing relative to script)
         try:
-             self.iconbitmap(resource_path("rend.ico"))
+            self.iconbitmap(resource_path("rend.ico"))
         except Exception:
-             pass
+            pass
 
         self.file_path = None
 
@@ -260,10 +259,7 @@ class App(ctk.CTk):
         ffmpeg_ok = False
         try:
             # Prevent black window popping up on Windows
-            startupinfo = None
-            creationflags = 0
-            if os.name == 'nt':
-                creationflags = subprocess.CREATE_NO_WINDOW
+            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 
             subprocess.run(
                 ["ffmpeg", "-version"], 
@@ -314,35 +310,45 @@ class App(ctk.CTk):
 
         self.btn_run.configure(state="disabled")
         self.btn_select.configure(state="disabled")
+        self.chk_quality.configure(state="disabled")
+        self.chk_karaoke.configure(state="disabled")
+        self.opt_model.configure(state="disabled")
         self.progress_bar.configure(mode="indeterminate")
         self.progress_bar.start()
-        
+
         folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
         output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
 
         # Get Options
         model = self.opt_model.get()
         shifts = 2 if self.chk_quality.get() == 1 else 1
-        two_stems = True if self.chk_karaoke.get() == 1 else False
+        two_stems = self.chk_karaoke.get() == 1
 
         self.worker = SeparationThread(
             input_file=self.file_path,
             output_folder=output_dir,
             model_name=model,
             shifts=shifts,
-            two_stems=two_stems, 
+            two_stems=two_stems,
             callback=self.update_ui
         )
+        self.worker.daemon = True
         self.worker.start()
 
     def update_ui(self, status_text, progress_val):
+        # Called from a background thread — marshal all UI work to the main thread
+        self.after(0, lambda s=status_text, v=progress_val: self._apply_update(s, v))
+
+    def _apply_update(self, status_text, progress_val):
         self.lbl_status.configure(text=status_text)
-        
+
         if status_text == "Done!":
             self.progress_bar.stop()
             self.progress_bar.configure(mode="determinate")
             self.progress_bar.set(1)
-            messagebox.showinfo("Success", f"Done! Saved to:\n{os.path.basename(self.file_path)}_stems")
+            folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
+            output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
+            messagebox.showinfo("Success", f"Done! Saved to:\n{output_dir}")
             self.reset_ui()
         elif status_text.startswith("Error"):
             self.progress_bar.stop()
@@ -350,6 +356,9 @@ class App(ctk.CTk):
             self.reset_ui()
 
     def reset_ui(self):
+        self.progress_bar.configure(mode="determinate")
+        self.progress_bar.set(0)
+        self.lbl_status.configure(text="Ready")
         self.btn_run.configure(state="normal")
         self.btn_select.configure(state="normal")
         self.chk_quality.configure(state="normal")

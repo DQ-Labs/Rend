@@ -1,0 +1,5 @@
+customtkinter
+soundfile
+torch
+# demucs and its dependencies are installed from source via setup_dev.ps1
+# Run: .\setup_dev.ps1 before installing these
