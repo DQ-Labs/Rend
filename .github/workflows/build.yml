@@ -27,19 +27,17 @@ jobs:
       - name: Install FFmpeg
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile "ffmpeg.zip"
-          Expand-Archive -Path "ffmpeg.zip" -DestinationPath "ffmpeg_temp"
-          $ffmpegExe = Get-ChildItem -Path "ffmpeg_temp" -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
-          $ffprobeExe = Get-ChildItem -Path "ffmpeg_temp" -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
-          Copy-Item -Path $ffmpegExe.FullName -Destination ".\ffmpeg.exe"
-          Copy-Item -Path $ffprobeExe.FullName -Destination ".\ffprobe.exe"
-          Remove-Item -Path "ffmpeg.zip"
-          Remove-Item -Path "ffmpeg_temp" -Recurse
+          # Install via Chocolatey — package integrity is verified by Chocolatey's checksum system
+          choco install ffmpeg --yes --no-progress
+          # Copy binaries to project root so PyInstaller can bundle them (see Rend.spec binaries)
+          Copy-Item (Get-Command ffmpeg).Source -Destination ".\ffmpeg.exe"
+          Copy-Item (Get-Command ffprobe).Source -Destination ".\ffprobe.exe"
 
       - name: Prepare Demucs Source
         shell: pwsh
         run: |
-          git clone https://github.com/facebookresearch/demucs.git demucs_source
+          # Pin to a specific release tag — never pull from an unpinned HEAD
+          git clone --depth 1 --branch v4.0.1 https://github.com/facebookresearch/demucs.git demucs_source
           
           # Patch requirements_minimal.txt
           $reqFile = "demucs_source/requirements_minimal.txt"
