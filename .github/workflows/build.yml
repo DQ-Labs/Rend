@@ -29,9 +29,14 @@ jobs:
         run: |
           # Install via Chocolatey — package integrity is verified by Chocolatey's checksum system
           choco install ffmpeg --yes --no-progress
-          # Copy binaries to project root so PyInstaller can bundle them (see Rend.spec binaries)
-          Copy-Item (Get-Command ffmpeg).Source -Destination ".\ffmpeg.exe"
-          Copy-Item (Get-Command ffprobe).Source -Destination ".\ffprobe.exe"
+          # Chocolatey creates shim wrappers in its bin folder — those are not standalone binaries
+          # and will not work when bundled by PyInstaller. Copy the real executables instead.
+          $ffmpegExe = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\ffmpeg" -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
+          $ffprobeExe = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\ffmpeg" -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+          Copy-Item $ffmpegExe.FullName -Destination ".\ffmpeg.exe"
+          Copy-Item $ffprobeExe.FullName -Destination ".\ffprobe.exe"
+          Write-Host "Bundling ffmpeg from: $($ffmpegExe.FullName)"
+          Write-Host "Bundling ffprobe from: $($ffprobeExe.FullName)"
 
       - name: Prepare Demucs Source
         shell: pwsh
