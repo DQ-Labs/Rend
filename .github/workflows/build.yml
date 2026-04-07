@@ -36,8 +36,10 @@ jobs:
       - name: Prepare Demucs Source
         shell: pwsh
         run: |
-          # Pin to a specific release tag — never pull from an unpinned HEAD
-          git clone --depth 1 --branch v4.0.1 https://github.com/facebookresearch/demucs.git demucs_source
+          # Pin to a specific commit SHA — demucs has no release tag that includes demucs.api
+          # e976d93 is the latest commit on main as of 2023-11-16 and is the version this app was built against
+          git clone https://github.com/facebookresearch/demucs.git demucs_source
+          git -C demucs_source checkout e976d93ecc3865e5757426930257e200846a520a
           
           # Patch requirements_minimal.txt
           $reqFile = "demucs_source/requirements_minimal.txt"
