@@ -1,13 +1,11 @@
 name: Build and Release Rend
 
 on:
-  push:
+  release:
+    types: [published]
+  pull_request:
     branches:
       - main
-    tags:
-      - 'v*'
-  release:
-    types: [created]
 
 jobs:
   build:
