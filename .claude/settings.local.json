@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:paidax01.github.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python -c ':*)",
+      "Bash(git -C /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan log --oneline -20)",
+      "Bash(git -C /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan log --oneline --all)",
+      "Bash(git -C /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan ls-files demucs_source/)",
+      "Bash(ls /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan/LICENSE*)",
+      "Bash(python3 -c \"import ast; print\\('N/A'\\)\")",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(python -c \"import demucs; print\\(demucs.__file__\\)\")",
+      "Bash(git -C /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan ls-tree -r HEAD)",
+      "Bash(git -C /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan log --oneline)",
+      "Bash(git -C /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan show HEAD:CONTEXT.md)",
+      "Bash(git -C /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan log --all --name-status)",
+      "Bash(git clone:*)",
+      "Bash(grep -h \"^import \\\\|^from \" /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan/demucs_source/demucs/*.py)",
+      "Bash(grep -v \"^\\\\\\\\.\")",
+      "Bash(grep -r \"importlib\\\\|__import__\\\\|import_module\\\\|getattr.*import\" /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan/demucs_source/demucs/*.py)",
+      "Bash(grep -r \"getattr\\(.*__import__\\\\|exec\\\\|eval\" /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan/demucs_source/demucs/*.py)",
+      "Bash(grep -h \"^class \" /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan/demucs_source/demucs/*.py)",
+      "Bash(ls /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan/*.png /c/Users/Brandy/Rend/.claude/worktrees/cranky-ramanujan/*.py)",
+      "Bash(gh pr create --title 'Rend v1.0' --body ':*)"
+    ]
+  }
+}
