@@ -287,7 +287,7 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Rend")
-        self.geometry("600x680")
+        self.geometry("600x720")
         self.resizable(False, False)
         self.configure(fg_color=self._WIN_BG)
 
@@ -398,7 +398,7 @@ class App(ctk.CTk):
 
         self.lbl_model_desc = ctk.CTkLabel(
             card, text=self.MODEL_INFO["htdemucs"],
-            font=("Roboto", 11), text_color=self._TXT_DIM,
+            font=("Roboto", 12), text_color=self._TXT_MID,
             wraplength=460, anchor="w", justify="left",
         )
         self.lbl_model_desc.grid(row=2, column=0, columnspan=2, padx=22, pady=(0, 14), sticky="w")
@@ -448,7 +448,7 @@ class App(ctk.CTk):
 
         # ── Progress area ─────────────────────────────────────────────────────
         prg = ctk.CTkFrame(self, fg_color="transparent")
-        prg.grid(row=4, column=0, sticky="ew", padx=36, pady=(4, 0))
+        prg.grid(row=4, column=0, sticky="ew", padx=36, pady=(8, 0))
         prg.grid_columnconfigure(0, weight=1)
 
         self.lbl_status = ctk.CTkLabel(
@@ -485,7 +485,7 @@ class App(ctk.CTk):
 
         self.lbl_attribution = ctk.CTkLabel(
             bar, text="Powered by Demucs",
-            font=("Roboto", 11), text_color="#004466",
+            font=("Roboto", 11), text_color="#00FFFF",
             cursor="hand2",
         )
         self.lbl_attribution.grid(row=0, column=2, sticky="e")
