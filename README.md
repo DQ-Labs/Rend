@@ -1,38 +1,44 @@
 # Rend
 
-A simple Windows GUI for AI Music Stem Separation (Demucs) built with CustomTkinter.
+A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](https://github.com/adefossez/demucs), built with CustomTkinter and packaged as a single-file EXE.
 
 ## Features
-- **Offline CPU Execution**: Uses `demucs` for processing without requiring a GPU or internet connection for inference (after model download).
-- **6 Model Options**: Choose from htdemucs, htdemucs_ft, htdemucs_6s, mdx, mdx_extra, and mdx_q — from fast defaults to high-precision options (see Model Selection below).
-- **High Quality Mode**: Enable `shifts=2` for better separation quality (runs slower).
-- **Karaoke Mode**: Automatic 2-stem output merging non-vocal stems into a single 'Accompaniment' track.
-- **WAV Export**: Saves separated stems directly as WAV files using `soundfile`.
-- **Dark Mode GUI**: Clean and modern interface powered by `customtkinter`.
-- **Threaded Processing**: Keeps the UI responsive during separation.
+
+- **Animated Splash Screen**: Rose Orbit math-curve loader animates during startup while heavy libraries load in the background
+- **6 Model Options**: htdemucs, htdemucs_ft, htdemucs_6s, mdx, mdx_extra, mdx_q — choose your speed/quality tradeoff
+- **Karaoke Mode**: Automatic 2-stem output (vocals + accompaniment) for backing tracks
+- **High Quality Mode**: Enable `shifts=2` for slower but higher-precision separation
+- **Cancel During Processing**: Stop an active separation at any segment boundary
+- **Open Output Folder**: Completion dialog offers one-click folder access
+- **Offline CPU Execution**: Full separation without GPU or internet (after initial model download)
+- **WAV Export**: Direct WAV output via soundfile, no intermediate formats
+- **Dark Mode UI**: Clean, modern palette with real-time status lights (FFmpeg, Online)
+- **Responsive Threading**: UI stays responsive during heavy processing
 
 ## Downloads
 
-**Windows users can download the latest standalone executable (no Python required) from the [Releases Page](https://github.com/DQ-Labs/Rend/releases).**
+**Windows users: Get the latest standalone EXE (no Python required) from [Releases](https://github.com/DQ-Labs/Rend/releases).**
 
 ## Model Selection
 
-| Model | Description |
-|---|---|
-| `htdemucs` | **Default.** Balanced speed and quality. Good starting point. |
-| `htdemucs_ft` | Fine-tuned. Slightly better vocals, but ~4x slower. |
-| `htdemucs_6s` | Experimental 6-stem split: Drums, Bass, Vocals, Guitar, Piano, Other. |
-| `mdx` | Classic model trained on MusDB HQ. Good baseline. |
-| `mdx_extra` | High-precision. Uses extra training data. Good for complex mixes. |
-| `mdx_q` | Quantized. Smaller download, slightly lower quality. |
+| Model | Speed | Quality | Best For |
+|---|---|---|---|
+| `htdemucs` | ⚡⚡ | ⭐⭐⭐ | **Default.** Balanced, good starting point. |
+| `htdemucs_ft` | ⚡ | ⭐⭐⭐⭐ | Fine-tuned. Better vocals, ~4× slower than default. |
+| `htdemucs_6s` | ⚡⚡ | ⭐⭐⭐ | 6-stem split (Drums, Bass, Vocals, Guitar, Piano, Other). |
+| `mdx` | ⚡⚡ | ⭐⭐⭐ | Classic. Trained on MusDB HQ. Solid baseline. |
+| `mdx_extra` | ⚡ | ⭐⭐⭐⭐ | High precision. Extra training data for complex mixes. |
+| `mdx_q` | ⚡⚡⚡ | ⭐⭐ | Quantized. Smallest download, lower quality. |
 
 ## Installation
 
 ### Prerequisites
-- **Python 3.10+**
-- **FFmpeg**: `ffmpeg.exe` and `ffprobe.exe` must be present in the root directory.
 
-### Setup
+- **Python 3.10+**
+- **FFmpeg**: `ffmpeg.exe` and `ffprobe.exe` in the root directory (only for source installs)
+
+### From Source
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/DQ-Labs/Rend.git
@@ -45,66 +51,72 @@ A simple Windows GUI for AI Music Stem Separation (Demucs) built with CustomTkin
    .\venv\Scripts\activate
    ```
 
-3. Install direct dependencies:
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Install Demucs and patch for Windows compatibility:
+4. Install Demucs from pinned source with Windows patches:
    ```powershell
    .\setup_dev.ps1
    ```
-   *This script clones the Demucs source, applies Windows compatibility patches, and installs it as an editable package.*
+
+5. Run the app:
+   ```bash
+   python app.py
+   ```
 
 ## Usage
 
-Run the application:
-```bash
-python app.py
-```
+1. **Select Audio**: Click the file zone and choose an MP3, WAV, or FLAC file
+2. **Pick a Model**: Choose from the 6 available options (see Models above)
+3. **Set Options**: Toggle High Quality mode or Karaoke Mode as desired
+4. **Separate**: Click **SEPARATE STEMS** and watch the progress
+5. **Cancel**: Click **Cancel** anytime to stop mid-processing
+6. **Open**: When done, click "Open output folder?" to browse the results
 
-1. Click **Browse Files** and choose an MP3, WAV, or FLAC file.
-2. Pick a model and toggle options as desired.
-3. Click **SEPARATE STEMS**.
-
-Output stems are saved as WAV files in a folder named `<filename>_stems` next to the input file (e.g. `mysong.mp3` → `mysong_stems/`).
-
-## Architecture
-- **Local Demucs Source**: The project relies on a local copy of the `demucs` library in `demucs_source/`, installed via `pip install -e .` with custom compatibility patches applied by `setup_dev.ps1`.
-- **Dependency Management**: Core dependencies (`torch`, `soundfile`, `customtkinter`) are listed in `requirements.txt`. Demucs must be installed from source.
+Output stems are saved as WAV files in a folder next to your input file (e.g., `mysong.mp3` → `mysong_stems/`).
 
 ## Building from Source
 
-To create a standalone EXE file using PyInstaller:
+To create a standalone `Rend.exe`:
 
-1. **Prerequisites**:
-   - `ffmpeg.exe` and `ffprobe.exe` present in the root directory.
-   - Virtual environment activated with all dependencies installed (see Setup above).
-
-2. **Build**:
+1. Ensure prerequisites are met and virtual environment is activated
+2. Run PyInstaller:
    ```bash
    pyinstaller Rend.spec --clean --noconfirm
    ```
 
-   The `Rend.spec` file is configured to:
-   - Include `demucs_source` in the path and data bundle.
-   - Bundle `ffmpeg.exe` and `ffprobe.exe` binaries.
-   - Handle hidden imports for `demucs` and `soundfile`.
-   - Create a single-file executable (`dist/Rend.exe`).
+The EXE will be in `dist/Rend.exe`. The spec file bundles FFmpeg, Demucs source, and all hidden imports automatically.
 
 ## Known Behavior
-- **Launch Time**: The `.exe` takes approximately **30 seconds to launch**. This is normal for a PyInstaller one-file build as it unpacks to a temporary runtime directory on first launch.
-- **First Run**: On the very first separation, the app will automatically download the necessary AI model weights. This requires an internet connection and may take a few minutes. Subsequent runs are fully offline.
-- **Windows SmartScreen**: Because the executable is unsigned, Windows may show a SmartScreen warning on first launch. Click "More info" → "Run anyway" to proceed.
+
+- **First Launch**: The EXE may take ~30 seconds to start (PyInstaller one-file unpacking). Subsequent launches are faster.
+- **First Separation**: On the very first run, the app downloads the selected model (~200 MB–1 GB depending on model). This requires internet and takes a few minutes. All subsequent runs are fully offline.
+- **Windows SmartScreen**: The unsigned EXE may trigger a warning on first run. Click "More info" → "Run anyway" to proceed.
+
+## Architecture
+
+- **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied
+- **CustomTkinter UI**: Dark-mode, palette-driven design with responsive threading
+- **PyInstaller Bundling**: Handles FFmpeg, demucs source, and transitive dependencies via explicit `hiddenimports`
 
 ## Troubleshooting
 
 ### Red FFmpeg indicator
 
-![Rend showing a red FFmpeg status dot](assets/ffmpeg-error.png)
+If the **● FFmpeg** status dot is red, the app cannot find FFmpeg on your PATH or in the project root.
 
-If the **● FFmpeg** dot in the bottom-left is **red**, the app cannot find `ffmpeg.exe` on your system PATH or in the project root.
+**This only affects source installs.** The standalone EXE bundles FFmpeg automatically.
 
-**This only affects source installs.** The standalone `.exe` from the [Releases Page](https://github.com/DQ-Labs/Rend/releases) bundles FFmpeg automatically — no action needed.
+For source installs: Download FFmpeg from [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/), extract `ffmpeg.exe` and `ffprobe.exe`, and place them in the Rend project root alongside `app.py`.
 
-If you are running from source, place `ffmpeg.exe` and `ffprobe.exe` in the project root directory (alongside `app.py`) and restart the app. FFmpeg builds for Windows are available at [gyan.dev/ffmpeg/builds](https://www.gyan.dev/ffmpeg/builds/).
+### Model download stuck
+
+If the first separation seems to hang during model download, check your internet connection. Large models (mdx_extra ~1 GB) may take several minutes.
+
+## License
+
+MIT License. Copyright (c) 2026 DQ-Labs.
+
+This software uses [Demucs](https://github.com/adefossez/demucs), which is also licensed under the MIT License (Copyright © Facebook, Inc. and its affiliates).
