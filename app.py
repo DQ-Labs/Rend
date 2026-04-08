@@ -298,6 +298,9 @@ class App(ctk.CTk):
     _TXT_HI     = "#d4d4f0"   # bright body text
     _TXT_MID    = "#7777aa"   # secondary text
     _TXT_DIM    = "#3a3a66"   # placeholder / label caps
+    _STATUS_OK   = "#00c853"  # status light: OK / green
+    _STATUS_WARN = "#ff9100"  # status light: warning / amber (e.g. offline)
+    _STATUS_ERR  = "#ff3d00"  # status light: error / red
 
     def __init__(self):
         super().__init__()
@@ -561,8 +564,8 @@ class App(ctk.CTk):
 
     def update_status_lights(self, ffmpeg_ok, online_ok):
         self._ffmpeg_ok = ffmpeg_ok
-        self.lbl_ffmpeg.configure(text_color="#00FF00" if ffmpeg_ok else "#FF0000")
-        self.lbl_online.configure(text_color="#00FF00" if online_ok else "#FFA500")
+        self.lbl_ffmpeg.configure(text_color=self._STATUS_OK if ffmpeg_ok else self._STATUS_ERR)
+        self.lbl_online.configure(text_color=self._STATUS_OK if online_ok else self._STATUS_WARN)
 
     def _on_ffmpeg_click(self, event):
         if self._ffmpeg_ok is None:
