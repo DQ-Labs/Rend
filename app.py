@@ -265,8 +265,16 @@ class SeparationThread(threading.Thread):
             self.callback(f"Error: {str(e)}", 0.0)
 
     def handle_progress(self, data):
-        # Update progress "heartbeat"
-        self.callback("Processing...", 0.5)
+        # Demucs calls this after each audio segment is processed.
+        # data = {'state': 'start'|'end', 'segment': offset, 'audio_length': total, ...}
+        # We only act on 'end' events so we report completed work, not started work.
+        if data.get('state') == 'end':
+            segment = data.get('segment', 0)
+            audio_length = data.get('audio_length', 1)
+            frac = min(segment / max(audio_length, 1), 1.0)
+            # Map into the 0.15 → 0.88 band, leaving headroom for
+            # the "Loading model…" (0.1) and "Saving…" (0.9) bookends.
+            self.callback("Processing...", 0.15 + frac * 0.73)
 
 class App(ctk.CTk):
 
@@ -474,8 +482,10 @@ class App(ctk.CTk):
         self.lbl_ffmpeg = ctk.CTkLabel(
             bar, text="● FFmpeg",
             font=("Roboto", 11), text_color=self._TXT_DIM,
+            cursor="hand2",
         )
         self.lbl_ffmpeg.grid(row=0, column=0, padx=(0, 12))
+        self.lbl_ffmpeg.bind("<Button-1>", self._on_ffmpeg_click)
 
         self.lbl_online = ctk.CTkLabel(
             bar, text="● Online",
@@ -490,6 +500,9 @@ class App(ctk.CTk):
         )
         self.lbl_attribution.grid(row=0, column=2, sticky="e")
         self.lbl_attribution.bind("<Button-1>", self.open_attribution)
+
+        self._ffmpeg_ok = None   # None = diagnostics pending, True/False after check
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Start Pre-Flight Check
         threading.Thread(target=self.run_diagnostics, daemon=True).start()
@@ -525,18 +538,42 @@ class App(ctk.CTk):
         self.after(1000, lambda: self.update_status_lights(ffmpeg_ok, online_ok))
 
     def update_status_lights(self, ffmpeg_ok, online_ok):
-        if ffmpeg_ok:
-            self.lbl_ffmpeg.configure(text_color="#00FF00") # Green
-        else:
-            self.lbl_ffmpeg.configure(text_color="#FF0000") # Red
+        self._ffmpeg_ok = ffmpeg_ok
+        self.lbl_ffmpeg.configure(text_color="#00FF00" if ffmpeg_ok else "#FF0000")
+        self.lbl_online.configure(text_color="#00FF00" if online_ok else "#FFA500")
 
-        if online_ok:
-            self.lbl_online.configure(text_color="#00FF00") # Green
+    def _on_ffmpeg_click(self, event):
+        if self._ffmpeg_ok is None:
+            return  # diagnostics still running
+        if self._ffmpeg_ok:
+            messagebox.showinfo("FFmpeg", "FFmpeg is installed and working correctly.")
+        elif getattr(sys, 'frozen', False):
+            messagebox.showwarning(
+                "FFmpeg Not Found",
+                "FFmpeg could not be found inside the app bundle.\n\n"
+                "This is unexpected — please report it as a bug on GitHub.",
+            )
         else:
-            self.lbl_online.configure(text_color="#FFA500") # Orange
+            messagebox.showwarning(
+                "FFmpeg Not Found",
+                "FFmpeg could not be found on your PATH or in the project root.\n\n"
+                "Place ffmpeg.exe and ffprobe.exe in the same folder as app.py "
+                "and restart.\n\n"
+                "Windows builds: gyan.dev/ffmpeg/builds",
+            )
 
     def open_attribution(self, event):
         webbrowser.open("https://github.com/adefossez/demucs")
+
+    def _on_close(self):
+        if hasattr(self, 'worker') and self.worker.is_alive():
+            if not messagebox.askyesno(
+                "Separation in progress",
+                "A separation is still running.\n\nQuit anyway? The output will be incomplete.",
+                icon="warning",
+            ):
+                return
+        self.destroy()
 
     def select_file(self):
         file = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.wav *.flac")])
@@ -562,8 +599,7 @@ class App(ctk.CTk):
         self.chk_quality.configure(state="disabled")
         self.chk_karaoke.configure(state="disabled")
         self.opt_model.configure(state="disabled")
-        self.progress_bar.configure(mode="indeterminate")
-        self.progress_bar.start()
+        self.progress_bar.set(0)
 
         folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
         output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
@@ -590,22 +626,18 @@ class App(ctk.CTk):
 
     def _apply_update(self, status_text, progress_val):
         self.lbl_status.configure(text=status_text)
+        self.progress_bar.set(min(max(progress_val, 0.0), 1.0))
 
         if status_text == "Done!":
-            self.progress_bar.stop()
-            self.progress_bar.configure(mode="determinate")
-            self.progress_bar.set(1)
             folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
             output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
             messagebox.showinfo("Success", f"Done! Saved to:\n{output_dir}")
             self.reset_ui()
         elif status_text.startswith("Error"):
-            self.progress_bar.stop()
             messagebox.showerror("Error", status_text)
             self.reset_ui()
 
     def reset_ui(self):
-        self.progress_bar.configure(mode="determinate")
         self.progress_bar.set(0)
         self.lbl_status.configure(text="Ready")
         self.btn_run.configure(state="normal")

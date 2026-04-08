@@ -63,7 +63,7 @@ Run the application:
 python app.py
 ```
 
-1. Click **Select Audio File** and choose an MP3, WAV, or FLAC file.
+1. Click **Browse Files** and choose an MP3, WAV, or FLAC file.
 2. Pick a model and toggle options as desired.
 3. Click **SEPARATE STEMS**.
 
