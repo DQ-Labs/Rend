@@ -199,7 +199,7 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 class SeparationThread(threading.Thread):
-    def __init__(self, input_file, output_folder, model_name, shifts, two_stems, callback):
+    def __init__(self, input_file, output_folder, model_name, shifts, two_stems, callback, stop_event):
         super().__init__()
         self.input_file = input_file
         self.output_folder = output_folder
@@ -207,6 +207,7 @@ class SeparationThread(threading.Thread):
         self.shifts = shifts
         self.two_stems = two_stems
         self.callback = callback
+        self.stop_event = stop_event
 
     def run(self):
         try:
@@ -262,6 +263,8 @@ class SeparationThread(threading.Thread):
 
             self.callback("Done!", 1.0)
 
+        except KeyboardInterrupt:
+            self.callback("Cancelled.", 0.0)
         except Exception as e:
             self.callback(f"Error: {str(e)}", 0.0)
 
@@ -269,6 +272,8 @@ class SeparationThread(threading.Thread):
         # Demucs calls this after each audio segment is processed.
         # data = {'state': 'start'|'end', 'segment': offset, 'audio_length': total, ...}
         # We only act on 'end' events so we report completed work, not started work.
+        if self.stop_event.is_set():
+            raise KeyboardInterrupt
         if data.get('state') == 'end':
             # 'segment_offset' is the frame offset of the completed chunk;
             # 'audio_length' is the total frame count — both always present per the API.
@@ -455,11 +460,25 @@ class App(ctk.CTk):
             text_color="white",
             corner_radius=26,
         )
-        self.btn_run.grid(row=3, column=0, pady=(18, 6))
+        self.btn_run.grid(row=3, column=0, pady=(18, 4))
+
+        self.btn_cancel = ctk.CTkButton(
+            self, text="✕  Cancel",
+            command=self._cancel_separation,
+            width=160, height=34,
+            font=("Roboto", 13),
+            fg_color="transparent",
+            border_width=1, border_color="#553333",
+            hover_color="#1a0a0a",
+            text_color="#cc4444",
+            corner_radius=17,
+        )
+        self.btn_cancel.grid(row=4, column=0, pady=(0, 4))
+        self.btn_cancel.grid_remove()  # hidden until processing starts
 
         # ── Progress area ─────────────────────────────────────────────────────
         prg = ctk.CTkFrame(self, fg_color="transparent")
-        prg.grid(row=4, column=0, sticky="ew", padx=36, pady=(8, 0))
+        prg.grid(row=5, column=0, sticky="ew", padx=36, pady=(8, 0))
         prg.grid_columnconfigure(0, weight=1)
 
         self.lbl_status = ctk.CTkLabel(
@@ -479,7 +498,7 @@ class App(ctk.CTk):
 
         # ── Status bar ────────────────────────────────────────────────────────
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.grid(row=5, column=0, sticky="ew", padx=28, pady=(10, 16))
+        bar.grid(row=6, column=0, sticky="ew", padx=28, pady=(10, 16))
         bar.grid_columnconfigure(1, weight=1)
 
         self.lbl_ffmpeg = ctk.CTkLabel(
@@ -603,6 +622,7 @@ class App(ctk.CTk):
         self.chk_karaoke.configure(state="disabled")
         self.opt_model.configure(state="disabled")
         self.progress_bar.set(0)
+        self.btn_cancel.grid()  # show cancel button
 
         folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
         output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
@@ -612,13 +632,15 @@ class App(ctk.CTk):
         shifts = 2 if self.chk_quality.get() == 1 else 1
         two_stems = self.chk_karaoke.get() == 1
 
+        self._stop_event = threading.Event()
         self.worker = SeparationThread(
             input_file=self.file_path,
             output_folder=output_dir,
             model_name=model,
             shifts=shifts,
             two_stems=two_stems,
-            callback=self.update_ui
+            callback=self.update_ui,
+            stop_event=self._stop_event,
         )
         self.worker.daemon = True
         self.worker.start()
@@ -634,8 +656,12 @@ class App(ctk.CTk):
         if status_text == "Done!":
             folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
             output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
-            messagebox.showinfo("Success", f"Done! Saved to:\n{output_dir}")
             self.reset_ui()
+            if messagebox.askyesno("Done!", f"Separation complete!\n\nOpen output folder?"):
+                os.startfile(output_dir)
+        elif status_text == "Cancelled.":
+            self.lbl_status.configure(text="Cancelled")
+            self.after(1200, self.reset_ui)
         elif status_text.startswith("Error"):
             messagebox.showerror("Error", status_text)
             self.reset_ui()
@@ -643,11 +669,26 @@ class App(ctk.CTk):
     def reset_ui(self):
         self.progress_bar.set(0)
         self.lbl_status.configure(text="Ready")
-        self.btn_run.configure(state="normal")
+        self.btn_cancel.configure(state="normal")  # re-arm for next run
+        self.btn_cancel.grid_remove()              # hide cancel button
         self.btn_select.configure(state="normal")
         self.chk_quality.configure(state="normal")
         self.chk_karaoke.configure(state="normal")
         self.opt_model.configure(state="normal")
+        self._reset_file_zone()
+
+    def _reset_file_zone(self):
+        self.file_path = None
+        self._zone_icon.configure(text="♫", text_color="#2e2e62")
+        self._zone_text.configure(text="Click to select an audio file", text_color=self._TXT_MID)
+        self._zone_sub.configure(text="MP3  ·  WAV  ·  FLAC", text_color=self._TXT_DIM)
+        self._file_zone.configure(border_color=self._CARD_BD)
+        self.btn_select.configure(text="Browse Files")
+        self.btn_run.configure(state="disabled")
+
+    def _cancel_separation(self):
+        self.btn_cancel.configure(state="disabled")
+        self._stop_event.set()
 
     def update_model_desc(self, choice):
         description = self.MODEL_INFO.get(choice, "")
