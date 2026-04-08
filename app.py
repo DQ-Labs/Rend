@@ -301,6 +301,7 @@ class App(ctk.CTk):
     _STATUS_OK   = "#00c853"  # status light: OK / green
     _STATUS_WARN = "#ff9100"  # status light: warning / amber (e.g. offline)
     _STATUS_ERR  = "#ff3d00"  # status light: error / red
+    _ZONE_ICON   = "#2e2e62"  # file zone icon (idle state)
 
     def __init__(self):
         super().__init__()
@@ -353,7 +354,7 @@ class App(ctk.CTk):
 
         self._zone_icon = ctk.CTkLabel(
             self._file_zone, text="♫",
-            font=("Helvetica", 40), text_color="#2e2e62",
+            font=("Helvetica", 40), text_color=self._ZONE_ICON,
         )
         self._zone_icon.grid(row=0, column=0, pady=(22, 2))
 
@@ -664,7 +665,7 @@ class App(ctk.CTk):
                 os.startfile(output_dir)
         elif status_text == "Cancelled.":
             self.lbl_status.configure(text="Cancelled")
-            self.after(1200, self.reset_ui)
+            self.after(1200, self._deferred_reset)
         elif status_text.startswith("Error"):
             messagebox.showerror("Error", status_text)
             self.reset_ui()
@@ -682,12 +683,18 @@ class App(ctk.CTk):
 
     def _reset_file_zone(self):
         self.file_path = None
-        self._zone_icon.configure(text="♫", text_color="#2e2e62")
+        self._zone_icon.configure(text="♫", text_color=self._ZONE_ICON)
         self._zone_text.configure(text="Click to select an audio file", text_color=self._TXT_MID)
         self._zone_sub.configure(text="MP3  ·  WAV  ·  FLAC", text_color=self._TXT_DIM)
         self._file_zone.configure(border_color=self._CARD_BD)
         self.btn_select.configure(text="Browse Files")
         self.btn_run.configure(state="disabled")
+
+    def _deferred_reset(self):
+        try:
+            self.reset_ui()
+        except tk.TclError:
+            pass  # window was closed during the post-cancel delay
 
     def _cancel_separation(self):
         self.btn_cancel.configure(state="disabled")
