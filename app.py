@@ -218,7 +218,8 @@ class SeparationThread(threading.Thread):
                 model=self.model_name,
                 device="cpu",
                 shifts=self.shifts,
-                progress=True,
+                progress=False,   # tqdm writes to stderr which is a DummyStream in --noconsole mode;
+                                  # our callback drives the progress bar instead
                 callback=self.handle_progress
             )
 
@@ -269,9 +270,11 @@ class SeparationThread(threading.Thread):
         # data = {'state': 'start'|'end', 'segment': offset, 'audio_length': total, ...}
         # We only act on 'end' events so we report completed work, not started work.
         if data.get('state') == 'end':
-            segment = data.get('segment', 0)
+            # 'segment_offset' is the frame offset of the completed chunk;
+            # 'audio_length' is the total frame count — both always present per the API.
+            offset = data.get('segment_offset', 0)
             audio_length = data.get('audio_length', 1)
-            frac = min(segment / max(audio_length, 1), 1.0)
+            frac = min(offset / max(audio_length, 1), 1.0)
             # Map into the 0.15 → 0.88 band, leaving headroom for
             # the "Loading model…" (0.1) and "Saving…" (0.9) bookends.
             self.callback("Processing...", 0.15 + frac * 0.73)
