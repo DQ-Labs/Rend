@@ -66,7 +66,11 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install customtkinter pyinstaller soundfile
+          # pyinstaller is a build tool — kept separate from runtime requirements
+          pip install pyinstaller
+          # requirements.txt is the single source of truth for runtime deps (torch, customtkinter, etc.)
+          pip install -r requirements.txt
+          # demucs is vendored from source at a pinned commit
           pip install -e ./demucs_source
 
       - name: Build EXE
