@@ -115,6 +115,10 @@ For source installs: Download FFmpeg from [gyan.dev/ffmpeg/builds](https://www.g
 
 If the first separation seems to hang during model download, check your internet connection. Large models (mdx_extra ~1 GB) may take several minutes.
 
+### Separation errors
+
+If a separation fails, the full error details are written to `%LOCALAPPDATA%\Rend\error.log` — please attach it when reporting an issue.
+
 ## License
 
 MIT License. Copyright (c) 2026 DQ-Labs.

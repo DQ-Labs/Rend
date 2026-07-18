@@ -68,7 +68,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX disabled: compressing the bundled torch/ffmpeg DLLs is a common
+    # source of antivirus false positives and occasional broken DLLs
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

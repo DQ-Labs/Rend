@@ -1,9 +1,14 @@
+# Pin to the same commit CI builds against (.github/workflows/build.yml)
+$demucsSha = "e976d93ecc3865e5757426930257e200846a520a"
+
 # Check if demucs_source exists
 if (-not (Test-Path "demucs_source")) {
     Write-Host "Cloning Demucs..."
     git clone https://github.com/facebookresearch/demucs.git demucs_source
+    git -C demucs_source checkout $demucsSha
 } else {
-    Write-Host "Demucs source already exists."
+    # Existing checkouts have patches applied, so don't force a checkout over them
+    Write-Host "Demucs source already exists. To re-pin to $demucsSha, delete demucs_source and re-run."
 }
 
 # Patch requirements_minimal.txt

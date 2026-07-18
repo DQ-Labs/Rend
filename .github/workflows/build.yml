@@ -25,8 +25,9 @@ jobs:
       - name: Install FFmpeg
         shell: pwsh
         run: |
-          # Install via Chocolatey — package integrity is verified by Chocolatey's checksum system
-          choco install ffmpeg --yes --no-progress
+          # Install via Chocolatey — package integrity is verified by Chocolatey's checksum system.
+          # Version pinned so every build ships the same ffmpeg.
+          choco install ffmpeg --version 8.1.2 --yes --no-progress
           # Chocolatey creates shim wrappers in its bin folder — those are not standalone binaries
           # and will not work when bundled by PyInstaller. Copy the real executables instead.
           $ffmpegExe = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\ffmpeg" -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
@@ -65,7 +66,7 @@ jobs:
       - name: Install Dependencies
         run: |
           # pyinstaller is a build tool — kept separate from runtime requirements
-          pip install pyinstaller
+          pip install pyinstaller==6.17.0
           # requirements.txt is the single source of truth for runtime deps (torch, customtkinter, etc.)
           pip install -r requirements.txt
           # demucs is vendored from source at a pinned commit
@@ -83,7 +84,7 @@ jobs:
 
       - name: Upload Release Asset
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v1
         with:
           files: dist/Rend.exe
         env:

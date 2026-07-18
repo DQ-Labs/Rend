@@ -3,6 +3,7 @@ import sys
 import math
 import time
 import threading
+import traceback
 import tkinter as tk
 
 # ── Animated Splash ───────────────────────────────────────────────────────────
@@ -171,10 +172,16 @@ import soundfile as sf
 
 # Fix Console Crash: Redirect stdout/stderr if None (happens in --noconsole mode)
 class DummyStream:
+    # Libraries (tqdm, logging) probe streams beyond write/flush
+    encoding = "utf-8"
     def write(self, text):
         pass
     def flush(self):
         pass
+    def isatty(self):
+        return False
+    def fileno(self):
+        raise OSError("DummyStream has no file descriptor")
 
 if sys.stdout is None:
     sys.stdout = DummyStream()
@@ -197,6 +204,17 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Rend", "error.log")
+
+def log_error(message):
+    """Append an error with traceback to a log file the user can send with bug reports."""
+    try:
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n{message}\n")
+    except Exception:
+        pass
 
 class SeparationThread(threading.Thread):
     def __init__(self, input_file, output_folder, model_name, shifts, two_stems, callback, stop_event):
@@ -259,13 +277,16 @@ class SeparationThread(threading.Thread):
                 filepath = os.path.join(self.output_folder, filename)
                 # Convert to numpy and transpose for soundfile
                 audio_np = source.cpu().numpy().transpose(1, 0)
-                sf.write(filepath, audio_np, separator.samplerate)
+                # subtype="FLOAT": PCM_16 (the WAV default) hard-clips samples
+                # outside +/-1.0, which the summed accompaniment routinely exceeds
+                sf.write(filepath, audio_np, separator.samplerate, subtype="FLOAT")
 
             self.callback("Done!", 1.0)
 
         except KeyboardInterrupt:
             self.callback("Cancelled.", 0.0)
         except Exception as e:
+            log_error(traceback.format_exc())
             self.callback(f"Error: {str(e)}", 0.0)
 
     def handle_progress(self, data):
@@ -554,8 +575,9 @@ class App(ctk.CTk):
         # 2. Check Internet
         online_ok = False
         try:
-            # Connect to Google DNS or Web to verify
-            socket.create_connection(("www.google.com", 80), timeout=3)
+            # Probe the host the model weights actually download from, so the
+            # light reflects whether a first-run download can succeed
+            socket.create_connection(("dl.fbaipublicfiles.com", 443), timeout=3)
             online_ok = True
         except OSError:
             online_ok = False
@@ -667,7 +689,7 @@ class App(ctk.CTk):
             self.lbl_status.configure(text="Cancelled")
             self.after(1200, self._deferred_reset)
         elif status_text.startswith("Error"):
-            messagebox.showerror("Error", status_text)
+            messagebox.showerror("Error", f"{status_text}\n\nDetails were saved to:\n{LOG_FILE}")
             self.reset_ui()
 
     def reset_ui(self):

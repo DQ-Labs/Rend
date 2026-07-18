@@ -10,3 +10,6 @@ demucs_source/
 *.mp3
 *.wav
 *.flac
+
+# Claude Code local worktrees
+.claude/worktrees/

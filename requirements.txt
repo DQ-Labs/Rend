@@ -1,5 +1,5 @@
-customtkinter
-soundfile
-torch
+customtkinter==5.2.2
+soundfile==0.13.1
+torch==2.9.1
 # demucs and its dependencies are installed from source via setup_dev.ps1
-# Run: .\setup_dev.ps1 before installing these
+# (see README "From Source" — install these first, then run .\setup_dev.ps1)
