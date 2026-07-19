@@ -14,6 +14,7 @@ A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](htt
 - **WAV Export**: Direct WAV output via soundfile, no intermediate formats
 - **Dark Mode UI**: Clean, modern palette with real-time status lights (FFmpeg, Online)
 - **Responsive Threading**: UI stays responsive during heavy processing
+- **About Pane**: Version, dependency credits, environment health, and a one-click bug-report link
 
 ## Downloads
 
@@ -95,8 +96,18 @@ The EXE will be in `dist/Rend.exe`. The spec file bundles FFmpeg, Demucs source,
 - **First Separation**: On the very first run, the app downloads the selected model (~200 MB–1 GB depending on model). This requires internet and takes a few minutes. All subsequent runs are fully offline.
 - **Windows SmartScreen**: The unsigned EXE may trigger a warning on first run. Click "More info" → "Run anyway" to proceed.
 
+## Releasing (maintainers)
+
+Releases are built by CI, never by hand:
+
+1. Bump `APP_VERSION` in `config.py` (the single source of truth for the app's name, version, and URLs).
+2. Tag the commit to match and push: `git tag v1.1.0 && git push origin v1.1.0`.
+3. CI verifies the tag matches `config.py`, builds the EXE, and creates a **draft** GitHub release.
+4. Install-test the artifact on a machine without the dev environment, then publish the draft.
+
 ## Architecture
 
+- **Single-Source Identity**: `config.py` defines the app name, version, URLs, and credits; the splash, window title, About pane, and CI all read from it
 - **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied
 - **CustomTkinter UI**: Dark-mode, palette-driven design with responsive threading
 - **PyInstaller Bundling**: Handles FFmpeg, demucs source, and transitive dependencies via explicit `hiddenimports`
@@ -117,7 +128,7 @@ If the first separation seems to hang during model download, check your internet
 
 ### Separation errors
 
-If a separation fails, the full error details are written to `%LOCALAPPDATA%\Rend\error.log` — please attach it when reporting an issue.
+If a separation fails, the full error details are written to `%LOCALAPPDATA%\Rend\error.log` — please attach it when reporting an issue. The **About** pane (bottom-right of the app) has a "Report a Bug" button that opens a pre-filled issue template.
 
 ## License
 

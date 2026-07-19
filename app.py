@@ -6,6 +6,8 @@ import threading
 import traceback
 import tkinter as tk
 
+import config
+
 # ── Animated Splash ───────────────────────────────────────────────────────────
 # Displayed while heavy imports (torch, demucs) load in a background thread.
 # Based on the "Rose Orbit" animation from math-curve-loaders (r = cos(kθ)).
@@ -43,9 +45,9 @@ class _AnimatedSplash:
         c.pack()
         self._canvas = c
 
-        c.create_text(self.W // 2, 40,  text="Rend",
+        c.create_text(self.W // 2, 40,  text=config.APP_NAME,
                       fill="white",   font=("Helvetica", 28, "bold"))
-        c.create_text(self.W // 2, 68,  text="AI Music Stem Separator",
+        c.create_text(self.W // 2, 68,  text=config.APP_TAGLINE,
                       fill="#555555", font=("Helvetica", 11))
         self._status_id = c.create_text(
             self.W // 2, self.H - 26, text="Loading AI models...",
@@ -205,7 +207,7 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Rend", "error.log")
+LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), config.APP_NAME, "error.log")
 
 def log_error(message):
     """Append an error with traceback to a log file the user can send with bug reports."""
@@ -327,7 +329,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Rend")
+        self.title(config.APP_NAME)
         self.geometry("600x720")
         self.resizable(False, False)
         self.configure(fg_color=self._WIN_BG)
@@ -356,12 +358,12 @@ class App(ctk.CTk):
         hdr.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            hdr, text="♪  Rend",
+            hdr, text=f"♪  {config.APP_NAME}",
             font=("Roboto Medium", 36), text_color="white",
         ).grid(row=0, column=0, pady=(28, 4))
 
         ctk.CTkLabel(
-            hdr, text="A I   M U S I C   S T E M   S E P A R A T O R",
+            hdr, text=" ".join(config.APP_TAGLINE.upper()),
             font=("Roboto", 10), text_color="#443377",
         ).grid(row=1, column=0, pady=(0, 22))
 
@@ -540,15 +542,25 @@ class App(ctk.CTk):
         )
         self.lbl_online.grid(row=0, column=1, sticky="w")
 
+        self.lbl_about = ctk.CTkLabel(
+            bar, text="About",
+            font=("Roboto", 11), text_color=self._TXT_MID,
+            cursor="hand2",
+        )
+        self.lbl_about.grid(row=0, column=2, sticky="e", padx=(0, 16))
+        self.lbl_about.bind("<Button-1>", self._show_about)
+
         self.lbl_attribution = ctk.CTkLabel(
             bar, text="Powered by Demucs",
             font=("Roboto", 11), text_color="#00FFFF",
             cursor="hand2",
         )
-        self.lbl_attribution.grid(row=0, column=2, sticky="e")
+        self.lbl_attribution.grid(row=0, column=3, sticky="e")
         self.lbl_attribution.bind("<Button-1>", self.open_attribution)
 
         self._ffmpeg_ok = None   # None = diagnostics pending, True/False after check
+        self._online_ok = None
+        self._about_win = None
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Start Pre-Flight Check
@@ -587,6 +599,7 @@ class App(ctk.CTk):
 
     def update_status_lights(self, ffmpeg_ok, online_ok):
         self._ffmpeg_ok = ffmpeg_ok
+        self._online_ok = online_ok
         self.lbl_ffmpeg.configure(text_color=self._STATUS_OK if ffmpeg_ok else self._STATUS_ERR)
         self.lbl_online.configure(text_color=self._STATUS_OK if online_ok else self._STATUS_WARN)
 
@@ -612,6 +625,91 @@ class App(ctk.CTk):
 
     def open_attribution(self, event):
         webbrowser.open("https://github.com/adefossez/demucs")
+
+    def _show_about(self, event=None):
+        if self._about_win is not None and self._about_win.winfo_exists():
+            self._about_win.lift()
+            self._about_win.focus_force()
+            return
+
+        win = ctk.CTkToplevel(self, fg_color=self._WIN_BG)
+        self._about_win = win
+        win.title(f"About {config.APP_NAME}")
+        win.geometry("420x470")
+        win.resizable(False, False)
+        win.transient(self)
+
+        ctk.CTkLabel(
+            win, text=config.APP_NAME,
+            font=("Roboto Medium", 26), text_color="white",
+        ).pack(pady=(24, 0))
+        ctk.CTkLabel(
+            win, text=f"v{config.APP_VERSION}",
+            font=("Roboto", 12), text_color=self._ACCENT,
+        ).pack()
+        ctk.CTkLabel(
+            win, text=config.APP_TAGLINE,
+            font=("Roboto", 11), text_color=self._TXT_MID,
+        ).pack(pady=(0, 12))
+
+        # Health: mirrors the main-window status lights
+        if self._ffmpeg_ok is None:
+            health_text, health_color = "Checking environment…", self._TXT_DIM
+        elif self._ffmpeg_ok:
+            health_text, health_color = "● FFmpeg OK", self._STATUS_OK
+        else:
+            health_text, health_color = "● FFmpeg missing", self._STATUS_ERR
+        if self._online_ok is False:
+            health_text += "    ● Offline (first model download needs internet)"
+        ctk.CTkLabel(
+            win, text=health_text,
+            font=("Roboto", 11), text_color=health_color,
+        ).pack(pady=(0, 10))
+
+        credits_frame = ctk.CTkFrame(
+            win, fg_color=self._CARD_BG, corner_radius=10,
+            border_width=1, border_color=self._CARD_BD,
+        )
+        credits_frame.pack(padx=24, pady=(0, 12), fill="x")
+        ctk.CTkLabel(
+            credits_frame, text="BUILT WITH",
+            font=("Roboto", 9), text_color=self._TXT_DIM,
+        ).pack(anchor="w", padx=16, pady=(10, 2))
+        for name, license_name, url in config.CREDITS:
+            lbl = ctk.CTkLabel(
+                credits_frame, text=f"{name}  ·  {license_name}",
+                font=("Roboto", 11), text_color=self._TXT_MID,
+                cursor="hand2",
+            )
+            lbl.pack(anchor="w", padx=16)
+            lbl.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+        ctk.CTkLabel(credits_frame, text="", font=("Roboto", 2)).pack(pady=(0, 6))
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(pady=(0, 8))
+        ctk.CTkButton(
+            btn_row, text="Report a Bug",
+            command=lambda: webbrowser.open(config.BUG_REPORT_URL),
+            width=130, height=30, font=("Roboto", 12),
+            fg_color=self._ACCENT, hover_color=self._ACCENT_HO,
+        ).grid(row=0, column=0, padx=6)
+        ctk.CTkButton(
+            btn_row, text="GitHub",
+            command=lambda: webbrowser.open(config.REPO_URL),
+            width=130, height=30, font=("Roboto", 12),
+            fg_color="transparent", border_width=1,
+            border_color=self._DIM, hover_color="#1a1a38",
+            text_color=self._TXT_MID,
+        ).grid(row=0, column=1, padx=6)
+
+        ctk.CTkLabel(
+            win, text=config.COPYRIGHT,
+            font=("Roboto", 10), text_color=self._TXT_DIM,
+        ).pack()
+        ctk.CTkLabel(
+            win, text=f"Error log: {LOG_FILE}",
+            font=("Roboto", 9), text_color=self._TXT_DIM,
+        ).pack(pady=(2, 12))
 
     def _on_close(self):
         if hasattr(self, 'worker') and self.worker.is_alive():
