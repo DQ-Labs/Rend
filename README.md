@@ -97,9 +97,20 @@ The EXE will be in `dist/Rend.exe`. The spec file bundles FFmpeg, Demucs source,
 
 ## Architecture
 
-- **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied
+- **Core / GUI split**: `rend_core.py` holds all separation logic — the worker thread, karaoke mixdown, stem saving, progress mapping, output-folder naming, error logging, and the FFmpeg/online diagnostics — and imports no GUI libraries. `app.py` is a thin CustomTkinter shell on top of it.
+- **Headless tests**: `tests/test_rend_core.py` exercises the core module without a display, demucs, or model downloads; CI runs it on every push and PR before any build starts.
+- **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied (`rend_core` imports it lazily, only when a separation actually runs)
 - **CustomTkinter UI**: Dark-mode, palette-driven design with responsive threading
 - **PyInstaller Bundling**: Handles FFmpeg, demucs source, and transitive dependencies via explicit `hiddenimports`
+
+### Running the tests
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+The tests need only the packages in `requirements.txt` — no FFmpeg, demucs install, or model downloads.
 
 ## Troubleshooting
 
