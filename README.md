@@ -121,11 +121,22 @@ Releases are built by CI, never by hand:
 
 ## Architecture
 
-- **Single-Source Identity**: `config.py` defines the app name, version, URLs, and credits; the splash, window title, About pane, and CI all read from it
-- **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied
+- **Single-Source Identity**: `config.py` defines the app name, version, URLs, and credits; the splash, window title, About pane, installer, and CI all read from it
+- **Core / GUI split**: `rend_core.py` holds all separation logic — the worker thread, karaoke mixdown, stem saving, progress mapping, output-folder naming, error logging, and the FFmpeg/online diagnostics — and imports no GUI libraries. `app.py` is a thin CustomTkinter shell on top of it.
+- **Headless tests**: `tests/test_rend_core.py` exercises the core module without a display, demucs, or model downloads; CI runs it on every push and PR before any build starts.
+- **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied (`rend_core` imports it lazily, only when a separation actually runs)
 - **CustomTkinter UI**: Dark-mode, palette-driven design with responsive threading
 - **PyInstaller Bundling**: Handles FFmpeg, demucs source, and transitive dependencies via explicit `hiddenimports`
 - **Inno Setup Installer**: `installer/build_installer.py` compiles `installer/Rend.iss` with identity values from `config.py`, producing the versioned installer that releases ship
+
+### Running the tests
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+The tests need only the packages in `requirements.txt` — no FFmpeg, demucs install, or model downloads.
 
 ## Troubleshooting
 

@@ -3,7 +3,6 @@ import sys
 import math
 import time
 import threading
-import traceback
 import tkinter as tk
 
 import config
@@ -134,14 +133,11 @@ _import_error: list = [None]   # holds the Exception if any import fails
 def _load_heavy():
     try:
         import webbrowser           # noqa: F401
-        import socket               # noqa: F401
-        import subprocess           # noqa: F401
         import customtkinter        # noqa: F401
         import tkinter.filedialog   # noqa: F401
         import tkinter.messagebox   # noqa: F401
         import demucs.api           # noqa: F401
-        import torch                # noqa: F401
-        import soundfile            # noqa: F401
+        import rend_core            # noqa: F401  (pulls in torch + soundfile)
     except Exception as exc:
         _import_error[0] = exc
     finally:
@@ -162,13 +158,15 @@ if _import_error[0] is not None:
 
 # All modules are now cached in sys.modules — these re-imports are instant.
 import webbrowser
-import socket
-import subprocess
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-import demucs.api
-import torch
-import soundfile as sf
+from rend_core import (
+    LOG_FILE,
+    SeparationThread,
+    check_ffmpeg,
+    check_online,
+    output_folder_for,
+)
 
 # ── Startup fixes ─────────────────────────────────────────────────────────────
 
@@ -206,106 +204,6 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
-
-LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), config.APP_NAME, "error.log")
-
-def log_error(message):
-    """Append an error with traceback to a log file the user can send with bug reports."""
-    try:
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"--- {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n{message}\n")
-    except Exception:
-        pass
-
-class SeparationThread(threading.Thread):
-    def __init__(self, input_file, output_folder, model_name, shifts, two_stems, callback, stop_event):
-        super().__init__()
-        self.input_file = input_file
-        self.output_folder = output_folder
-        self.model_name = model_name
-        self.shifts = shifts
-        self.two_stems = two_stems
-        self.callback = callback
-        self.stop_event = stop_event
-
-    def run(self):
-        try:
-            # 1. Configure the Separator
-            # device="cpu" is safer for compatibility.
-            # We explicitly do NOT ask for MP3 support here to avoid the missing library crash.
-            # shifts=1 is default, >1 is slower but better quality
-            separator = demucs.api.Separator(
-                model=self.model_name,
-                device="cpu",
-                shifts=self.shifts,
-                progress=False,   # tqdm writes to stderr which is a DummyStream in --noconsole mode;
-                                  # our callback drives the progress bar instead
-                callback=self.handle_progress
-            )
-
-            # 2. Start Separation
-            self.callback(f"Loading {self.model_name}... (First run takes time)", 0.1)
-            origin, separated = separator.separate_audio_file(self.input_file)
-
-            # 3. Save the Stems
-            self.callback("Saving WAV files...", 0.9)
-            os.makedirs(self.output_folder, exist_ok=True)
-
-            # Manually save as WAV to avoid triggering any internal MP3 calls
-
-            # Karaoke Mode: If two_stems is True, we want "vocals" and "accompaniment"
-            # Demucs (4-source) returns: drums, bass, other, vocals
-
-            if self.two_stems:
-                # Guard: not all models produce a "vocals" stem (e.g. htdemucs_6s
-                # uses different internal naming). Fail clearly instead of KeyError.
-                if "vocals" not in separated:
-                    raise ValueError(
-                        f"The '{self.model_name}' model does not produce a 'vocals' "
-                        "stem and cannot be used with Karaoke Mode."
-                    )
-                # Combine everything except vocals into "accompaniment"
-                vocals = separated.pop("vocals")
-                accompaniment = torch.zeros_like(vocals)
-                for stem, source in separated.items():
-                    accompaniment += source
-
-                # Overwrite separated dict to only have these two
-                separated = {"vocals": vocals, "accompaniment": accompaniment}
-
-            for stem, source in separated.items():
-                filename = f"{stem}.wav"
-                filepath = os.path.join(self.output_folder, filename)
-                # Convert to numpy and transpose for soundfile
-                audio_np = source.cpu().numpy().transpose(1, 0)
-                # subtype="FLOAT": PCM_16 (the WAV default) hard-clips samples
-                # outside +/-1.0, which the summed accompaniment routinely exceeds
-                sf.write(filepath, audio_np, separator.samplerate, subtype="FLOAT")
-
-            self.callback("Done!", 1.0)
-
-        except KeyboardInterrupt:
-            self.callback("Cancelled.", 0.0)
-        except Exception as e:
-            log_error(traceback.format_exc())
-            self.callback(f"Error: {str(e)}", 0.0)
-
-    def handle_progress(self, data):
-        # Demucs calls this after each audio segment is processed.
-        # data = {'state': 'start'|'end', 'segment': offset, 'audio_length': total, ...}
-        # We only act on 'end' events so we report completed work, not started work.
-        if self.stop_event.is_set():
-            raise KeyboardInterrupt
-        if data.get('state') == 'end':
-            # 'segment_offset' is the frame offset of the completed chunk;
-            # 'audio_length' is the total frame count — both always present per the API.
-            offset = data.get('segment_offset', 0)
-            audio_length = data.get('audio_length', 1)
-            frac = min(offset / max(audio_length, 1), 1.0)
-            # Map into the 0.15 → 0.88 band, leaving headroom for
-            # the "Loading model…" (0.1) and "Saving…" (0.9) bookends.
-            self.callback("Processing...", 0.15 + frac * 0.73)
 
 class App(ctk.CTk):
 
@@ -567,32 +465,8 @@ class App(ctk.CTk):
         threading.Thread(target=self.run_diagnostics, daemon=True).start()
 
     def run_diagnostics(self):
-        # 1. Check FFmpeg
-        ffmpeg_ok = False
-        try:
-            # Prevent black window popping up on Windows
-            creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-
-            subprocess.run(
-                ["ffmpeg", "-version"],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=creationflags
-            )
-            ffmpeg_ok = True
-        except Exception:
-            ffmpeg_ok = False
-
-        # 2. Check Internet
-        online_ok = False
-        try:
-            # Probe the host the model weights actually download from, so the
-            # light reflects whether a first-run download can succeed
-            socket.create_connection(("dl.fbaipublicfiles.com", 443), timeout=3)
-            online_ok = True
-        except OSError:
-            online_ok = False
+        ffmpeg_ok = check_ffmpeg()
+        online_ok = check_online()
 
         # Schedule UI Update on Main Thread
         self.after(1000, lambda: self.update_status_lights(ffmpeg_ok, online_ok))
@@ -748,8 +622,7 @@ class App(ctk.CTk):
         self.progress_bar.set(0)
         self.btn_cancel.grid()  # show cancel button
 
-        folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
-        output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
+        output_dir = output_folder_for(self.file_path)
 
         # Get Options
         model = self.opt_model.get()
@@ -778,8 +651,7 @@ class App(ctk.CTk):
         self.progress_bar.set(min(max(progress_val, 0.0), 1.0))
 
         if status_text == "Done!":
-            folder_name = os.path.splitext(os.path.basename(self.file_path))[0] + "_stems"
-            output_dir = os.path.join(os.path.dirname(self.file_path), folder_name)
+            output_dir = output_folder_for(self.file_path)
             self.reset_ui()
             if messagebox.askyesno("Done!", f"Separation complete!\n\nOpen output folder?"):
                 os.startfile(output_dir)
