@@ -18,7 +18,9 @@ A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](htt
 
 ## Downloads
 
-**Windows users: Get the latest standalone EXE (no Python required) from [Releases](https://github.com/DQ-Labs/Rend/releases).**
+**Windows users: Get the latest installer (`Rend-Setup-<version>.exe`, no Python required) from [Releases](https://github.com/DQ-Labs/Rend/releases).**
+
+The installer adds a Start-menu entry, installs to `Program Files\Rend`, and registers an uninstaller in Windows **Apps & Features**.
 
 ## Model Selection
 
@@ -90,11 +92,23 @@ To create a standalone `Rend.exe`:
 
 The EXE will be in `dist/Rend.exe`. The spec file bundles FFmpeg, Demucs source, and all hidden imports automatically.
 
+### Building the Installer
+
+To wrap `dist/Rend.exe` in the Windows installer that releases ship:
+
+1. Install [Inno Setup](https://jrsoftware.org/isinfo.php) 6.3+ (`choco install innosetup`)
+2. Run the build script:
+   ```bash
+   python installer/build_installer.py
+   ```
+
+The installer will be in `dist/installer/Rend-Setup-<version>.exe`. The script reads the app name, version, publisher, and URLs from `config.py` and passes them to Inno Setup as `/D` defines, so `installer/Rend.iss` never duplicates them.
+
 ## Known Behavior
 
 - **First Launch**: The EXE may take ~30 seconds to start (PyInstaller one-file unpacking). Subsequent launches are faster.
 - **First Separation**: On the very first run, the app downloads the selected model (~200 MB–1 GB depending on model). This requires internet and takes a few minutes. All subsequent runs are fully offline.
-- **Windows SmartScreen**: The unsigned EXE may trigger a warning on first run. Click "More info" → "Run anyway" to proceed.
+- **Windows SmartScreen**: The unsigned installer may trigger a warning when run. Click "More info" → "Run anyway" to proceed.
 
 ## Releasing (maintainers)
 
@@ -102,8 +116,8 @@ Releases are built by CI, never by hand:
 
 1. Bump `APP_VERSION` in `config.py` (the single source of truth for the app's name, version, and URLs).
 2. Tag the commit to match and push: `git tag v1.1.0 && git push origin v1.1.0`.
-3. CI verifies the tag matches `config.py`, builds the EXE, and creates a **draft** GitHub release.
-4. Install-test the artifact on a machine without the dev environment, then publish the draft.
+3. CI verifies the tag matches `config.py`, builds the EXE, wraps it in the Inno Setup installer, and creates a **draft** GitHub release with the installer attached.
+4. Install-test the installer on a machine without the dev environment, then publish the draft.
 
 ## Architecture
 
@@ -111,6 +125,7 @@ Releases are built by CI, never by hand:
 - **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied
 - **CustomTkinter UI**: Dark-mode, palette-driven design with responsive threading
 - **PyInstaller Bundling**: Handles FFmpeg, demucs source, and transitive dependencies via explicit `hiddenimports`
+- **Inno Setup Installer**: `installer/build_installer.py` compiles `installer/Rend.iss` with identity values from `config.py`, producing the versioned installer that releases ship
 
 ## Troubleshooting
 

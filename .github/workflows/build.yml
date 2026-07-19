@@ -93,11 +93,22 @@ jobs:
         run: |
           pyinstaller Rend.spec
 
+      - name: Build Installer
+        shell: pwsh
+        run: |
+          # Wrap the PyInstaller exe with Inno Setup: Start-menu entry,
+          # Apps & Features uninstaller, predictable install location.
+          # Version pinned so every build uses the same compiler.
+          choco install innosetup --version 6.4.3 --yes --no-progress
+          # Reads name/version/publisher/URLs from config.py and passes
+          # them to ISCC as /D defines — no identity duplicated in the .iss.
+          python installer/build_installer.py
+
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v6
         with:
-          name: Rend-Windows-Exe
-          path: dist/Rend.exe
+          name: Rend-Windows-Installer
+          path: dist/installer/Rend-Setup-*.exe
 
       - name: Draft GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -106,6 +117,7 @@ jobs:
           # Draft so the artifact can be install-tested on a clean machine
           # before the release is published by hand.
           draft: true
-          files: dist/Rend.exe
+          # The installer — not the bare exe — is what users download.
+          files: dist/installer/Rend-Setup-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
