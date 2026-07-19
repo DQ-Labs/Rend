@@ -2,6 +2,10 @@
 
 A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](https://github.com/adefossez/demucs), built with CustomTkinter and packaged as a single-file EXE.
 
+<p align="center">
+  <img src=".github/images/main-window.png" alt="Rend main window" width="480">
+</p>
+
 ## Features
 
 - **Animated Splash Screen**: Rose Orbit math-curve loader animates during startup while heavy libraries load in the background
