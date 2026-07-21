@@ -14,8 +14,9 @@ A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](htt
 - **High Quality Mode**: Enable `shifts=2` for slower but higher-precision separation
 - **Cancel During Processing**: Stop an active separation at any segment boundary
 - **Open Output Folder**: Completion dialog offers one-click folder access
-- **Offline CPU Execution**: Full separation without GPU or internet (after initial model download)
-- **WAV Export**: Direct WAV output via soundfile, no intermediate formats
+- **GPU Acceleration**: Auto-detects an NVIDIA (CUDA) GPU and uses it when present, falling back to CPU otherwise — shown by the ● GPU / ● CPU status light. (The prebuilt installer ships CPU-only PyTorch; GPU requires a source install with a CUDA build of PyTorch.)
+- **Offline Execution**: Full separation without internet (after initial model download), on CPU or GPU
+- **WAV or FLAC Export**: Direct output via soundfile — 32-bit float WAV (lossless headroom) or 24-bit FLAC (~half the size)
 - **Dark Mode UI**: Clean, modern palette with real-time status lights (FFmpeg, Online)
 - **Responsive Threading**: UI stays responsive during heavy processing
 - **About Pane**: Version, dependency credits, environment health, and a one-click bug-report link

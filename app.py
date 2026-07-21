@@ -166,6 +166,7 @@ from rend_core import (
     check_ffmpeg,
     check_online,
     output_folder_for,
+    select_device,
 )
 
 # ── Startup fixes ─────────────────────────────────────────────────────────────
@@ -355,7 +356,7 @@ class App(ctk.CTk):
         ).grid(row=4, column=0, columnspan=2, padx=22, pady=(12, 8), sticky="w")
 
         chk_row = ctk.CTkFrame(card, fg_color="transparent")
-        chk_row.grid(row=5, column=0, columnspan=2, padx=22, pady=(0, 18), sticky="w")
+        chk_row.grid(row=5, column=0, columnspan=2, padx=22, pady=(0, 12), sticky="w")
 
         self.chk_quality = ctk.CTkCheckBox(
             chk_row, text="High Quality  (Slow)",
@@ -372,6 +373,37 @@ class App(ctk.CTk):
             border_color=self._DIM, checkmark_color="white",
         )
         self.chk_karaoke.grid(row=0, column=1)
+
+        # Output format: WAV (float, large, lossless headroom) vs FLAC (24-bit,
+        # ~half the size, lossless but clips the karaoke accompaniment sum).
+        fmt_row = ctk.CTkFrame(card, fg_color="transparent")
+        fmt_row.grid(row=6, column=0, columnspan=2, padx=22, pady=(0, 18), sticky="w")
+
+        ctk.CTkLabel(
+            fmt_row, text="Output",
+            font=("Roboto", 13), text_color=self._TXT_MID,
+        ).grid(row=0, column=0, padx=(0, 14))
+
+        self.seg_format = ctk.CTkSegmentedButton(
+            fmt_row,
+            values=["WAV", "FLAC"],
+            font=("Roboto", 12),
+            fg_color="#1a1a38",
+            selected_color=self._ACCENT,
+            selected_hover_color=self._ACCENT_HO,
+            unselected_color="#1a1a38",
+            unselected_hover_color="#333366",
+            text_color=self._TXT_HI,
+            command=self._update_format_hint,
+        )
+        self.seg_format.grid(row=0, column=1)
+        self.seg_format.set("WAV")
+
+        self.lbl_format_hint = ctk.CTkLabel(
+            fmt_row, text="Uncompressed · largest files",
+            font=("Roboto", 11), text_color=self._TXT_DIM,
+        )
+        self.lbl_format_hint.grid(row=0, column=2, padx=(14, 0))
 
         # ── Run button ────────────────────────────────────────────────────────
         self.btn_run = ctk.CTkButton(
@@ -424,7 +456,7 @@ class App(ctk.CTk):
         # ── Status bar ────────────────────────────────────────────────────────
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=6, column=0, sticky="ew", padx=28, pady=(10, 16))
-        bar.grid_columnconfigure(1, weight=1)
+        bar.grid_columnconfigure(2, weight=1)
 
         self.lbl_ffmpeg = ctk.CTkLabel(
             bar, text="● FFmpeg",
@@ -434,18 +466,26 @@ class App(ctk.CTk):
         self.lbl_ffmpeg.grid(row=0, column=0, padx=(0, 12))
         self.lbl_ffmpeg.bind("<Button-1>", self._on_ffmpeg_click)
 
+        self.lbl_device = ctk.CTkLabel(
+            bar, text="● Device",
+            font=("Roboto", 11), text_color=self._TXT_DIM,
+            cursor="hand2",
+        )
+        self.lbl_device.grid(row=0, column=1, padx=(0, 12))
+        self.lbl_device.bind("<Button-1>", self._on_device_click)
+
         self.lbl_online = ctk.CTkLabel(
             bar, text="● Online",
             font=("Roboto", 11), text_color=self._TXT_DIM,
         )
-        self.lbl_online.grid(row=0, column=1, sticky="w")
+        self.lbl_online.grid(row=0, column=2, sticky="w")
 
         self.lbl_about = ctk.CTkLabel(
             bar, text="About",
             font=("Roboto", 11), text_color=self._TXT_MID,
             cursor="hand2",
         )
-        self.lbl_about.grid(row=0, column=2, sticky="e", padx=(0, 16))
+        self.lbl_about.grid(row=0, column=3, sticky="e", padx=(0, 16))
         self.lbl_about.bind("<Button-1>", self._show_about)
 
         self.lbl_attribution = ctk.CTkLabel(
@@ -453,11 +493,12 @@ class App(ctk.CTk):
             font=("Roboto", 11), text_color="#00FFFF",
             cursor="hand2",
         )
-        self.lbl_attribution.grid(row=0, column=3, sticky="e")
+        self.lbl_attribution.grid(row=0, column=4, sticky="e")
         self.lbl_attribution.bind("<Button-1>", self.open_attribution)
 
         self._ffmpeg_ok = None   # None = diagnostics pending, True/False after check
         self._online_ok = None
+        self._device = None      # "cuda"/"cpu", resolved by diagnostics
         self._about_win = None
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -467,15 +508,22 @@ class App(ctk.CTk):
     def run_diagnostics(self):
         ffmpeg_ok = check_ffmpeg()
         online_ok = check_online()
+        device = select_device()
 
         # Schedule UI Update on Main Thread
-        self.after(1000, lambda: self.update_status_lights(ffmpeg_ok, online_ok))
+        self.after(1000, lambda: self.update_status_lights(ffmpeg_ok, online_ok, device))
 
-    def update_status_lights(self, ffmpeg_ok, online_ok):
+    def update_status_lights(self, ffmpeg_ok, online_ok, device):
         self._ffmpeg_ok = ffmpeg_ok
         self._online_ok = online_ok
+        self._device = device
         self.lbl_ffmpeg.configure(text_color=self._STATUS_OK if ffmpeg_ok else self._STATUS_ERR)
         self.lbl_online.configure(text_color=self._STATUS_OK if online_ok else self._STATUS_WARN)
+        # GPU is a green "bonus"; CPU is the normal, expected state (neutral).
+        if device == "cuda":
+            self.lbl_device.configure(text="● GPU", text_color=self._STATUS_OK)
+        else:
+            self.lbl_device.configure(text="● CPU", text_color=self._TXT_MID)
 
     def _on_ffmpeg_click(self, event):
         if self._ffmpeg_ok is None:
@@ -496,6 +544,30 @@ class App(ctk.CTk):
                 "and restart.\n\n"
                 "Windows builds: gyan.dev/ffmpeg/builds",
             )
+
+    def _on_device_click(self, event):
+        if self._device is None:
+            return  # diagnostics still running
+        if self._device == "cuda":
+            messagebox.showinfo(
+                "Device: GPU",
+                "An NVIDIA (CUDA) GPU was detected and will be used for "
+                "separation — several times faster than CPU.",
+            )
+        else:
+            messagebox.showinfo(
+                "Device: CPU",
+                "No CUDA GPU was detected, so separation runs on the CPU.\n\n"
+                "This is fully supported — GPU acceleration only requires an "
+                "NVIDIA card with a CUDA-enabled build of PyTorch.",
+            )
+
+    def _update_format_hint(self, choice):
+        hints = {
+            "WAV":  "Uncompressed · largest files",
+            "FLAC": "Lossless · ~half the size",
+        }
+        self.lbl_format_hint.configure(text=hints.get(choice, ""))
 
     def open_attribution(self, event):
         webbrowser.open("https://github.com/adefossez/demucs")
@@ -619,6 +691,7 @@ class App(ctk.CTk):
         self.chk_quality.configure(state="disabled")
         self.chk_karaoke.configure(state="disabled")
         self.opt_model.configure(state="disabled")
+        self.seg_format.configure(state="disabled")
         self.progress_bar.set(0)
         self.btn_cancel.grid()  # show cancel button
 
@@ -628,6 +701,7 @@ class App(ctk.CTk):
         model = self.opt_model.get()
         shifts = 2 if self.chk_quality.get() == 1 else 1
         two_stems = self.chk_karaoke.get() == 1
+        output_format = self.seg_format.get().lower()  # "WAV"/"FLAC" -> "wav"/"flac"
 
         self._stop_event = threading.Event()
         self.worker = SeparationThread(
@@ -638,6 +712,8 @@ class App(ctk.CTk):
             two_stems=two_stems,
             callback=self.update_ui,
             stop_event=self._stop_event,
+            device=self._device,  # None until diagnostics finish → auto-detect in the thread
+            output_format=output_format,
         )
         self.worker.daemon = True
         self.worker.start()
@@ -671,6 +747,7 @@ class App(ctk.CTk):
         self.chk_quality.configure(state="normal")
         self.chk_karaoke.configure(state="normal")
         self.opt_model.configure(state="normal")
+        self.seg_format.configure(state="normal")
         self._reset_file_zone()
 
     def _reset_file_zone(self):
