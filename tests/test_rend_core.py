@@ -11,6 +11,7 @@ import rend_core
 from rend_core import (
     DemucsEngine,
     Engine,
+    RoformerEngine,
     SeparationThread,
     engine_for_model,
     get_engine,
@@ -139,6 +140,29 @@ def test_save_stems_rejects_unknown_format(tmp_path):
         save_stems({"vocals": torch.zeros(2, 32)}, str(tmp_path), 44100, fmt="mp3")
 
 
+# ── FFmpeg resolution ─────────────────────────────────────────────────────────
+
+def test_ffmpeg_exe_prefers_path(monkeypatch):
+    monkeypatch.setattr(rend_core.shutil, "which", lambda name: r"C:\tools\ffmpeg.exe")
+    assert rend_core.ffmpeg_exe() == r"C:\tools\ffmpeg.exe"
+
+
+def test_ffmpeg_exe_falls_back_to_bundled_copy(monkeypatch, tmp_path):
+    # Windows does not search the working directory, so a source install with
+    # ffmpeg.exe beside the app must still resolve — this was silently broken.
+    monkeypatch.setattr(rend_core.shutil, "which", lambda name: None)
+    monkeypatch.setattr(rend_core.sys, "_MEIPASS", str(tmp_path), raising=False)
+    local = tmp_path / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    local.write_text("")
+    assert rend_core.ffmpeg_exe() == str(local)
+
+
+def test_ffmpeg_exe_last_resort_is_bare_name(monkeypatch, tmp_path):
+    monkeypatch.setattr(rend_core.shutil, "which", lambda name: None)
+    monkeypatch.setattr(rend_core.sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert rend_core.ffmpeg_exe() == "ffmpeg"  # nothing found; let it fail loudly
+
+
 # ── Device selection ──────────────────────────────────────────────────────────
 
 def test_select_device_prefers_cuda_when_available(monkeypatch):
@@ -165,10 +189,14 @@ def test_get_engine_returns_demucs_engine():
     assert isinstance(get_engine("demucs"), DemucsEngine)
 
 
+def test_get_engine_returns_roformer_engine():
+    assert isinstance(get_engine("roformer"), RoformerEngine)
+
+
 def test_get_engine_unwired_engine_raises_clear_error():
-    # "roformer" is catalogued but not wired until a later phase.
-    with pytest.raises(ValueError, match="roformer"):
-        get_engine("roformer")
+    # BS-RoFormer is catalogued but its architecture isn't vendored yet.
+    with pytest.raises(ValueError, match="bs_roformer"):
+        get_engine("bs_roformer")
 
 
 def test_engine_for_model_maps_demucs_models():
@@ -176,8 +204,12 @@ def test_engine_for_model_maps_demucs_models():
     assert engine_for_model("mdx_extra") == "demucs"
 
 
-def test_engine_for_model_maps_downloadable_to_roformer():
-    assert engine_for_model("bs_roformer_sw") == "roformer"
+def test_engine_for_model_maps_vendored_roformer_model():
+    assert engine_for_model("melband_guitar") == "roformer"
+
+
+def test_engine_for_model_maps_unvendored_arch_to_its_own_engine():
+    assert engine_for_model("bs_roformer_sw") == "bs_roformer"
 
 
 def test_engine_for_unknown_model_defaults_to_demucs():

@@ -7,8 +7,11 @@ lazily inside SeparationThread.run() because demucs is installed from source
 """
 
 import os
+import shutil
 import socket
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -17,6 +20,7 @@ import torch
 import soundfile as sf
 
 import config
+import downloader
 import registry
 
 LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), config.APP_NAME, "error.log")
@@ -101,13 +105,30 @@ def save_stems(separated, output_folder, samplerate, fmt="wav"):
         sf.write(filepath, audio_np, samplerate, format=sf_format, subtype=subtype)
 
 
+def ffmpeg_exe():
+    """Return the ffmpeg executable to invoke.
+
+    PATH first, then the copy shipped alongside the app — the PyInstaller bundle
+    dir when frozen, or the project root for source installs (where the README
+    tells users to drop ffmpeg.exe). Windows does not search the working
+    directory for executables, so the explicit fallback is what makes a source
+    install work at all.
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    local = os.path.join(base, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    return local if os.path.exists(local) else "ffmpeg"
+
+
 def check_ffmpeg():
-    """Return True if ffmpeg is runnable from PATH."""
+    """Return True if ffmpeg is runnable (PATH or bundled/project-root copy)."""
     try:
         # Prevent black window popping up on Windows
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         subprocess.run(
-            ["ffmpeg", "-version"],
+            [ffmpeg_exe(), "-version"],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -194,8 +215,99 @@ class DemucsEngine(Engine):
         save_stems(separated, req.output_folder, separator.samplerate, req.output_format)
 
 
+def decode_audio(path, target_sr, channels=2):
+    """Decode *path* to a float32 (channels, samples) tensor at *target_sr*.
+
+    Routed through the bundled ffmpeg so every input Rend accepts (MP3/WAV/FLAC)
+    is handled — along with resampling and channel normalization — without
+    adding a resampler dependency.
+    """
+    fd, tmp_wav = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    try:
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        subprocess.run(
+            [ffmpeg_exe(), "-v", "error", "-y", "-i", path,
+             "-ac", str(channels), "-ar", str(target_sr), "-c:a", "pcm_f32le", tmp_wav],
+            check=True, capture_output=True, creationflags=creationflags,
+        )
+        data, _ = sf.read(tmp_wav, dtype="float32", always_2d=True)  # (frames, channels)
+    finally:
+        try:
+            os.remove(tmp_wav)
+        except OSError:
+            pass
+    return torch.from_numpy(data.T.copy())  # (channels, samples)
+
+
+class RoformerEngine(Engine):
+    """In-process RoFormer separation using the vendored architecture.
+
+    Only the checkpoint is downloaded (sha256-verified, on first use); the model
+    code and config are vendored in roformer_source/, so this needs no external
+    tool and runs in Rend's own environment — which also gives real per-chunk
+    progress and cancellation, like the demucs engine.
+    """
+    name = "roformer"
+
+    def separate(self, req):
+        # Deferred so the vendored model code is imported only when a RoFormer
+        # model actually runs.
+        from roformer_source import inference as roformer_inference
+        from roformer_source import model_configs
+
+        model_rec = registry.get_model(req.model_name)
+        if model_rec is None or not model_rec.arch_config:
+            raise ValueError(f"Model {req.model_name!r} has no vendored RoFormer config.")
+        cfg = model_configs.get_config(model_rec.arch_config)
+
+        # 1. Weights — downloaded on first use, rejected on sha256 mismatch.
+        if not registry.is_installed(model_rec):
+            def dl_progress(done, total):
+                frac = (done / total) if total else 0.0
+                req.callback(f"Downloading model... {int(frac * 100)}%", 0.02 + 0.08 * frac)
+
+            req.callback(f"Downloading {model_rec.display_name}...", 0.02)
+            downloader.download_model(model_rec, progress=dl_progress)
+
+        req.callback(f"Loading {model_rec.display_name} on {req.device.upper()}...", 0.1)
+        model = roformer_inference.build_model(cfg)
+        missing, _unexpected = roformer_inference.load_checkpoint(
+            model, str(registry.model_file_path(model_rec.files[0])), device=req.device,
+        )
+        if missing:
+            raise RuntimeError(
+                f"Checkpoint does not match the vendored architecture "
+                f"({len(missing)} missing keys, e.g. {missing[:3]})."
+            )
+        model.eval().to(req.device)
+
+        # 2. Decode at the model's sample rate.
+        sr = cfg["audio"]["sample_rate"]
+        audio = decode_audio(req.input_file, sr)
+
+        # 3. Chunked inference, reported into the same 0.15-0.88 band as demucs.
+        target = roformer_inference.separate_chunked(
+            model, audio,
+            chunk_size=cfg["audio"]["chunk_size"],
+            num_overlap=cfg["inference"]["num_overlap"],
+            progress=lambda frac: req.callback("Separating...", progress_fraction(frac, 1.0)),
+            should_stop=req.stop_event.is_set,
+            device=req.device,
+        )
+
+        # 4. A num_stems=1 model predicts the target; the rest is the remainder.
+        req.callback(f"Saving {req.output_format.upper()} files...", 0.9)
+        save_stems(
+            {cfg["stems"]["target"]: target,
+             cfg["stems"]["complement"]: audio - target},
+            req.output_folder, sr, req.output_format,
+        )
+
+
 _ENGINES = {
     DemucsEngine.name: DemucsEngine,
+    RoformerEngine.name: RoformerEngine,
 }
 
 

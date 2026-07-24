@@ -9,10 +9,10 @@ is cheap and fully testable headlessly (tests/test_registry.py). Actually
 fetching/verifying weights lives in downloader.py, which builds on the records
 defined here.
 
-Engine wiring status (Phase 1 of the RoFormer work): only the "demucs" engine
-is executed today. "roformer" records are catalog-only — their metadata (URL,
-size, sha256, license) is real and verified, but nothing runs them until the
-engine layer lands in a later phase.
+Engine wiring status: "demucs" and "roformer" (in-process, vendored — see
+roformer_source/) are executed today. "bs_roformer" is catalog-only — its
+metadata (URL, size, sha256, license) is real and verified, but that
+architecture isn't vendored yet, so get_engine() rejects it with a clear error.
 """
 
 import os
@@ -50,6 +50,8 @@ class Model:
     license: str = ""
     license_url: str = ""
     redistributable: bool = True      # may Rend bundle/rehost the weights? False → download-on-demand only
+    arch_config: str = ""             # key into roformer_source.model_configs (engine == "roformer")
+    cpu_x_realtime: float = 0.0       # rough CPU runtime as a multiple of song length, for ETA
 
     @property
     def downloadable(self) -> bool:
@@ -87,6 +89,26 @@ _DEMUCS_MODELS = (
           license="MIT — Meta AI Research", license_url="https://github.com/adefossez/demucs"),
 )
 
+# RoFormer models run in-process by the vendored engine (roformer_source/).
+# Only the checkpoint is downloaded — the architecture and config are vendored —
+# so these behave exactly like the Demucs models: weights fetched on first use.
+_ROFORMER_MODELS = (
+    Model("melband_guitar", "Mel-RoFormer Guitar (becruily)", "roformer",
+          ("guitar", "other"), "download", karaoke=False,
+          description="RoFormer guitar isolation — markedly cleaner than Demucs on "
+                      "distorted guitar. Small download, slower than Demucs on CPU.",
+          files=(ModelFile(
+              "becruily_guitar.ckpt",
+              "https://huggingface.co/becruily/mel-band-roformer-guitar/resolve/main/becruily_guitar.ckpt",
+              45142183,
+              "83472bbf125774af5282d2e0b86df89eaf2dd45e8a4ec8d68e820ebf3e42a83c",
+          ),),
+          license="None declared", license_url="https://huggingface.co/becruily/mel-band-roformer-guitar",
+          redistributable=False,
+          arch_config="becruily_guitar",
+          cpu_x_realtime=2.7),
+)
+
 # Optional, higher-quality downloadable models (catalog-only until the engine
 # layer lands). URL/size/sha256 are real and were verified against the
 # HuggingFace API in the reference project (mimrock/musichammer) on 2026-07-05.
@@ -96,7 +118,7 @@ _DEMUCS_MODELS = (
 # this checkpoint. It may only be downloaded on demand from the author's own
 # repo, with the license state shown to the user. See downloader.py.
 _DOWNLOADABLE_MODELS = (
-    Model("bs_roformer_sw", "BS-RoFormer SW (6 stems, best quality)", "roformer",
+    Model("bs_roformer_sw", "BS-RoFormer SW (6 stems, best quality)", "bs_roformer",
           ("vocals", "drums", "bass", "guitar", "piano", "other"), "download", karaoke=True,
           description="Highest separation quality (esp. guitar). Large download, "
                       "much slower on CPU than Demucs.",
@@ -111,7 +133,7 @@ _DOWNLOADABLE_MODELS = (
           redistributable=False),
 )
 
-MODELS = _DEMUCS_MODELS + _DOWNLOADABLE_MODELS
+MODELS = _DEMUCS_MODELS + _ROFORMER_MODELS + _DOWNLOADABLE_MODELS
 _BY_ID = {m.id: m for m in MODELS}
 
 

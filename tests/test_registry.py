@@ -74,6 +74,24 @@ def test_downloadable_models_carry_verifiable_file_records():
             assert _SHA256_RE.match(f.sha256), f"{f.name} sha256 is not 64 hex chars"
 
 
+def test_melband_guitar_is_vendored_roformer_download():
+    m = get_model("melband_guitar")
+    assert m is not None
+    assert m.engine == "roformer"             # in-process, vendored architecture
+    assert m.downloadable is True             # Rend fetches the checkpoint itself
+    assert m.arch_config == "becruily_guitar"
+    assert m.stems == ("guitar", "other")
+    assert m.redistributable is False         # no license grant — never bundle
+
+
+def test_vendored_roformer_models_have_a_known_arch_config():
+    # A roformer model without a vendored config would fail only at run time.
+    from roformer_source.model_configs import CONFIGS
+    for m in registry.all_models():
+        if m.engine == "roformer":
+            assert m.arch_config in CONFIGS, f"{m.id} references unknown config"
+
+
 def test_unlicensed_model_is_flagged_non_redistributable():
     # The load-bearing guardrail: a model with no license grant must never be
     # marked redistributable, so Rend can only ever download it on demand.
