@@ -1,5 +1,11 @@
 customtkinter==5.2.2
 soundfile==0.13.1
 torch==2.9.1
+# RoFormer engine — in-process inference with the vendored architecture in
+# roformer_source/ (see roformer_source/mel_band_roformer.py for lineage).
+# All light and additive; no librosa/numba (mel filterbank is reimplemented).
+einops==0.8.1
+rotary-embedding-torch==0.9.1
+beartype==0.22.9
 # demucs and its dependencies are installed from source via setup_dev.ps1
 # (see README "From Source" — install these first, then run .\setup_dev.ps1)
