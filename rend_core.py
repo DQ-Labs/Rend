@@ -298,11 +298,14 @@ class RoformerEngine(Engine):
 
         # 4. A num_stems=1 model predicts the target; the rest is the remainder.
         req.callback(f"Saving {req.output_format.upper()} files...", 0.9)
-        save_stems(
-            {cfg["stems"]["target"]: target,
-             cfg["stems"]["complement"]: audio - target},
-            req.output_folder, sr, req.output_format,
-        )
+        stems = {cfg["stems"]["target"]: target,
+                 cfg["stems"]["complement"]: audio - target}
+        # A vocals/instrumental model is already a karaoke split. When Karaoke
+        # Mode is on, use Rend's established naming so the output matches what
+        # the demucs path produces.
+        if req.two_stems and {"instrumental", "vocals"} <= set(stems):
+            stems["accompaniment"] = stems.pop("instrumental")
+        save_stems(stems, req.output_folder, sr, req.output_format)
 
 
 _ENGINES = {

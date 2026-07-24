@@ -84,6 +84,25 @@ def test_melband_guitar_is_vendored_roformer_download():
     assert m.redistributable is False         # no license grant — never bundle
 
 
+def test_melband_instrumental_is_the_karaoke_roformer():
+    m = get_model("melband_instrumental")
+    assert m is not None
+    assert m.engine == "roformer"
+    assert m.karaoke is True
+    assert m.stems == ("instrumental", "vocals")
+    assert m.arch_config == "becruily_instrumental"
+    assert m.redistributable is False
+
+
+def test_roformer_configs_keep_per_checkpoint_quirks():
+    # These two checkpoints differ in mlp_expansion_factor: the guitar model needs
+    # 1, the instrumental one uses the upstream default. Getting this wrong loads
+    # silently wrong weights, so pin the distinction.
+    from roformer_source.model_configs import get_config
+    assert get_config("becruily_guitar")["model"]["mlp_expansion_factor"] == 1
+    assert "mlp_expansion_factor" not in get_config("becruily_instrumental")["model"]
+
+
 def test_vendored_roformer_models_have_a_known_arch_config():
     # A roformer model without a vendored config would fail only at run time.
     from roformer_source.model_configs import CONFIGS

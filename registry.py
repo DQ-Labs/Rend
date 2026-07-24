@@ -93,6 +93,21 @@ _DEMUCS_MODELS = (
 # Only the checkpoint is downloaded — the architecture and config are vendored —
 # so these behave exactly like the Demucs models: weights fetched on first use.
 _ROFORMER_MODELS = (
+    Model("melband_instrumental", "Mel-RoFormer Vocals / Instrumental (becruily)", "roformer",
+          ("instrumental", "vocals"), "download", karaoke=True,
+          description="RoFormer vocal/instrumental split — noticeably cleaner than Demucs "
+                      "for karaoke and backing tracks. Large download (~913 MB).",
+          files=(ModelFile(
+              "mel_band_roformer_instrumental_becruily.ckpt",
+              "https://huggingface.co/becruily/mel-band-roformer-instrumental/resolve/main/"
+              "mel_band_roformer_instrumental_becruily.ckpt",
+              913106900,
+              "a8da6632a1c25efb1c9be783ce9ea367d226d4b918cd6c3717c8b1d7a396041d",
+          ),),
+          license="None declared", license_url="https://huggingface.co/becruily/mel-band-roformer-instrumental",
+          redistributable=False,
+          arch_config="becruily_instrumental",
+          cpu_x_realtime=5.1),   # measured on CPU: 20s clip in 102s (228M params)
     Model("melband_guitar", "Mel-RoFormer Guitar (becruily)", "roformer",
           ("guitar", "other"), "download", karaoke=False,
           description="RoFormer guitar isolation — markedly cleaner than Demucs on "
@@ -106,7 +121,7 @@ _ROFORMER_MODELS = (
           license="None declared", license_url="https://huggingface.co/becruily/mel-band-roformer-guitar",
           redistributable=False,
           arch_config="becruily_guitar",
-          cpu_x_realtime=2.7),
+          cpu_x_realtime=3.0),   # measured on CPU: 20s clip in 59s (22M params)
 )
 
 # Optional, higher-quality downloadable models (catalog-only until the engine
