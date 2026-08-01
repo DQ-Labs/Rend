@@ -6,6 +6,7 @@ import threading
 import tkinter as tk
 
 import config
+import registry   # stdlib-only model catalog: safe to import before the splash
 
 # ── Animated Splash ───────────────────────────────────────────────────────────
 # Displayed while heavy imports (torch, demucs) load in a background thread.
@@ -163,6 +164,7 @@ from tkinter import filedialog, messagebox
 from rend_core import (
     LOG_FILE,
     SeparationThread,
+    available_models,
     check_ffmpeg,
     check_online,
     output_folder_for,
@@ -225,11 +227,22 @@ class App(ctk.CTk):
     _STATUS_ERR  = "#ff3d00"  # status light: error / red
     _ZONE_ICON   = "#2e2e62"  # file zone icon (idle state)
 
+    # Credit follows the engine actually selected — Demucs and the vendored
+    # Mel-Band RoFormer are separate projects under separate copyrights.
+    _ENGINE_CREDIT = {
+        "demucs":   ("Powered by Demucs", "https://github.com/adefossez/demucs"),
+        "roformer": ("Powered by Mel-Band RoFormer", "https://github.com/lucidrains/BS-RoFormer"),
+    }
+
     def __init__(self):
         super().__init__()
 
         self.title(config.APP_NAME)
-        self.geometry("600x720")
+        # 840 is what the layout actually requires (winfo_reqheight reports 826
+        # plus margin). The window was previously too short for its own content:
+        # the status-bar row was clipped off the bottom — visible in the README
+        # screenshot — and the format row and model meta line made it worse.
+        self.geometry("600x840")
         self.resizable(False, False)
         self.configure(fg_color=self._WIN_BG)
 
@@ -240,14 +253,13 @@ class App(ctk.CTk):
 
         self.file_path = None
 
-        self.MODEL_INFO = {
-            "htdemucs":    "The Default. Balanced speed and quality.",
-            "htdemucs_ft": "Fine-Tuned. Slightly better vocals, but 4× slower.",
-            "htdemucs_6s": "Six Stems — Drums, Bass, Vocals, Guitar, Piano, Other.",
-            "mdx":         "Classic Model. Trained on MusDB HQ. Good baseline.",
-            "mdx_extra":   "High Precision. Extra training data for complex mixes.",
-            "mdx_q":       "Quantized. Smaller download, slightly lower quality.",
-        }
+        # The picker is driven entirely by the registry (via rend_core, which
+        # filters out models whose engine this build can't run). Labels carry a
+        # download badge for weights that aren't on disk yet, so they change as
+        # models arrive — _model_by_label is rebuilt by _refresh_model_menu().
+        self._models = available_models()
+        self._model_by_label = {}
+        self._selected_id = self._models[0].id
 
         self.grid_columnconfigure(0, weight=1)
 
@@ -325,8 +337,8 @@ class App(ctk.CTk):
 
         self.opt_model = ctk.CTkOptionMenu(
             card,
-            values=["htdemucs", "htdemucs_ft", "htdemucs_6s", "mdx", "mdx_extra", "mdx_q"],
-            width=162,
+            values=[registry.menu_label(m) for m in self._models],
+            width=240,   # fits the longest label: "RoFormer Vocals   ↓ 913 MB"
             font=("Roboto", 13),
             fg_color="#1a1a38",
             button_color=self._DIM,
@@ -336,27 +348,37 @@ class App(ctk.CTk):
             command=self.update_model_desc,
         )
         self.opt_model.grid(row=1, column=1, padx=(0, 22), pady=(0, 4), sticky="e")
-        self.opt_model.set("htdemucs")
 
+        # Fixed heights: descriptions run to one or two wrapped lines depending
+        # on the model, and the window is a fixed size — letting the card grow
+        # would push the status bar off the bottom when the selection changes.
         self.lbl_model_desc = ctk.CTkLabel(
-            card, text=self.MODEL_INFO["htdemucs"],
+            card, text="",
             font=("Roboto", 12), text_color=self._TXT_MID,
-            wraplength=460, anchor="w", justify="left",
+            wraplength=470, height=34, anchor="nw", justify="left",
         )
-        self.lbl_model_desc.grid(row=2, column=0, columnspan=2, padx=22, pady=(0, 14), sticky="w")
+        self.lbl_model_desc.grid(row=2, column=0, columnspan=2, padx=22, sticky="w")
+
+        # Download state, license and rough CPU cost for the selected model.
+        self.lbl_model_meta = ctk.CTkLabel(
+            card, text="",
+            font=("Roboto", 11), text_color=self._TXT_DIM,
+            wraplength=470, height=16, anchor="w", justify="left",
+        )
+        self.lbl_model_meta.grid(row=3, column=0, columnspan=2, padx=22, pady=(0, 12), sticky="w")
 
         # Divider
         ctk.CTkFrame(card, fg_color=self._CARD_BD, height=1, corner_radius=0).grid(
-            row=3, column=0, columnspan=2, padx=22, sticky="ew",
+            row=4, column=0, columnspan=2, padx=22, sticky="ew",
         )
 
         ctk.CTkLabel(
             card, text="OPTIONS",
             font=("Roboto", 9), text_color=self._TXT_DIM,
-        ).grid(row=4, column=0, columnspan=2, padx=22, pady=(12, 8), sticky="w")
+        ).grid(row=5, column=0, columnspan=2, padx=22, pady=(12, 8), sticky="w")
 
         chk_row = ctk.CTkFrame(card, fg_color="transparent")
-        chk_row.grid(row=5, column=0, columnspan=2, padx=22, pady=(0, 12), sticky="w")
+        chk_row.grid(row=6, column=0, columnspan=2, padx=22, pady=(0, 12), sticky="w")
 
         self.chk_quality = ctk.CTkCheckBox(
             chk_row, text="High Quality  (Slow)",
@@ -377,7 +399,7 @@ class App(ctk.CTk):
         # Output format: WAV (float, large, lossless headroom) vs FLAC (24-bit,
         # ~half the size, lossless but clips the karaoke accompaniment sum).
         fmt_row = ctk.CTkFrame(card, fg_color="transparent")
-        fmt_row.grid(row=6, column=0, columnspan=2, padx=22, pady=(0, 18), sticky="w")
+        fmt_row.grid(row=7, column=0, columnspan=2, padx=22, pady=(0, 18), sticky="w")
 
         ctk.CTkLabel(
             fmt_row, text="Output",
@@ -500,7 +522,12 @@ class App(ctk.CTk):
         self._online_ok = None
         self._device = None      # "cuda"/"cpu", resolved by diagnostics
         self._about_win = None
+        self._attribution_url = self._ENGINE_CREDIT["demucs"][1]
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Populate the picker and everything that follows from it (description,
+        # meta line, Karaoke availability, engine credit).
+        self._refresh_model_menu()
 
         # Start Pre-Flight Check
         threading.Thread(target=self.run_diagnostics, daemon=True).start()
@@ -570,7 +597,7 @@ class App(ctk.CTk):
         self.lbl_format_hint.configure(text=hints.get(choice, ""))
 
     def open_attribution(self, event):
-        webbrowser.open("https://github.com/adefossez/demucs")
+        webbrowser.open(self._attribution_url)
 
     def _show_about(self, event=None):
         if self._about_win is not None and self._about_win.winfo_exists():
@@ -581,7 +608,7 @@ class App(ctk.CTk):
         win = ctk.CTkToplevel(self, fg_color=self._WIN_BG)
         self._about_win = win
         win.title(f"About {config.APP_NAME}")
-        win.geometry("420x470")
+        win.geometry("420x490")
         win.resizable(False, False)
         win.transient(self)
 
@@ -683,8 +710,118 @@ class App(ctk.CTk):
             self.btn_select.configure(text="Change File")
             self.btn_run.configure(state="normal")
 
+    def _confirm_model_download(self, model):
+        """License gate shown before the first download of a model's weights.
+
+        Rend never bundles or rehosts these checkpoints — several are published
+        with no license grant at all (see registry.py), so the first use of one
+        is the moment to say where the file comes from and under what terms.
+        Returns True to proceed. Once the weights are on disk is_installed() is
+        True and the gate is not shown again for that model.
+        """
+        win = ctk.CTkToplevel(self, fg_color=self._WIN_BG)
+        win.title("Download model")
+        win.geometry("470x400")
+        win.resizable(False, False)
+        win.transient(self)
+
+        result = {"ok": False}
+
+        ctk.CTkLabel(
+            win, text=model.display_name,
+            font=("Roboto Medium", 15), text_color="white",
+            wraplength=410, justify="left",
+        ).pack(padx=28, pady=(24, 4), anchor="w")
+        ctk.CTkLabel(
+            win, text="These weights are not included in Rend and will be downloaded now.",
+            font=("Roboto", 12), text_color=self._TXT_MID,
+            wraplength=410, justify="left",
+        ).pack(padx=28, pady=(0, 14), anchor="w")
+
+        facts = ctk.CTkFrame(
+            win, fg_color=self._CARD_BG, corner_radius=10,
+            border_width=1, border_color=self._CARD_BD,
+        )
+        facts.pack(padx=28, pady=(0, 14), fill="x")
+        source = model.files[0].url.split("/")[2] if model.files else "the model author"
+        for field, value in (
+            ("Size",    registry.format_size(registry.download_size(model))),
+            ("From",    source),
+            ("License", model.license or "None declared"),
+        ):
+            row = ctk.CTkFrame(facts, fg_color="transparent")
+            row.pack(fill="x", padx=16, pady=3)
+            ctk.CTkLabel(
+                row, text=field, font=("Roboto", 11), text_color=self._TXT_DIM, width=60, anchor="w",
+            ).pack(side="left")
+            ctk.CTkLabel(
+                row, text=value, font=("Roboto", 12), text_color=self._TXT_HI,
+                wraplength=320, justify="left", anchor="w",
+            ).pack(side="left")
+
+        if not model.redistributable:
+            ctk.CTkLabel(
+                win,
+                text="The author publishes this model without a license grant, so Rend "
+                     "downloads it from their page rather than bundling it. Review the "
+                     "model page before using its output in a released project.",
+                font=("Roboto", 11), text_color=self._STATUS_WARN,
+                wraplength=410, justify="left",
+            ).pack(padx=28, pady=(0, 8), anchor="w")
+
+        if model.license_url:
+            link = ctk.CTkLabel(
+                win, text="Open the model page",
+                font=("Roboto", 11), text_color="#00FFFF", cursor="hand2",
+            )
+            link.pack(padx=28, anchor="w")
+            link.bind("<Button-1>", lambda e: webbrowser.open(model.license_url))
+
+        if self._online_ok is False:
+            ctk.CTkLabel(
+                win, text="● You appear to be offline — the download will fail.",
+                font=("Roboto", 11), text_color=self._STATUS_ERR,
+                wraplength=410, justify="left",
+            ).pack(padx=28, pady=(8, 0), anchor="w")
+
+        def choose(ok):
+            result["ok"] = ok
+            win.destroy()
+
+        btn_row = ctk.CTkFrame(win, fg_color="transparent")
+        btn_row.pack(pady=(16, 0))
+        ctk.CTkButton(
+            btn_row, text="Cancel", command=lambda: choose(False),
+            width=120, height=32, font=("Roboto", 12),
+            fg_color="transparent", border_width=1, border_color=self._DIM,
+            hover_color="#1a1a38", text_color=self._TXT_MID,
+        ).grid(row=0, column=0, padx=6)
+        ctk.CTkButton(
+            btn_row, text="Download & Separate", command=lambda: choose(True),
+            width=170, height=32, font=("Roboto", 12),
+            fg_color=self._ACCENT, hover_color=self._ACCENT_HO,
+        ).grid(row=0, column=1, padx=6)
+
+        win.protocol("WM_DELETE_WINDOW", lambda: choose(False))
+        # CTkToplevel is not viewable the instant it is created, and grab_set on
+        # a window that isn't mapped yet raises TclError — so defer the grab.
+        win.after(200, win.grab_set)
+        self.wait_window(win)
+        return result["ok"]
+
     def start_separation(self):
         if not self.file_path: return
+
+        model = self._model_by_label.get(self.opt_model.get())
+        if model is None:
+            return
+
+        # First use of a downloadable model: take consent before any network
+        # traffic. The engine downloads the weights as its first step, so the
+        # gate has to happen here, before the worker thread starts.
+        if model.downloadable and not registry.is_installed(model):
+            if not self._confirm_model_download(model):
+                return
 
         self.btn_run.configure(state="disabled")
         self.btn_select.configure(state="disabled")
@@ -698,7 +835,6 @@ class App(ctk.CTk):
         output_dir = output_folder_for(self.file_path)
 
         # Get Options
-        model = self.opt_model.get()
         shifts = 2 if self.chk_quality.get() == 1 else 1
         two_stems = self.chk_karaoke.get() == 1
         output_format = self.seg_format.get().lower()  # "WAV"/"FLAC" -> "wav"/"flac"
@@ -707,7 +843,7 @@ class App(ctk.CTk):
         self.worker = SeparationThread(
             input_file=self.file_path,
             output_folder=output_dir,
-            model_name=model,
+            model_name=model.id,
             shifts=shifts,
             two_stems=two_stems,
             callback=self.update_ui,
@@ -748,6 +884,9 @@ class App(ctk.CTk):
         self.chk_karaoke.configure(state="normal")
         self.opt_model.configure(state="normal")
         self.seg_format.configure(state="normal")
+        # A model may have been downloaded during the run just finished — drop
+        # its download badge (and re-apply the Karaoke rule for the selection).
+        self._refresh_model_menu()
         self._reset_file_zone()
 
     def _reset_file_zone(self):
@@ -769,16 +908,58 @@ class App(ctk.CTk):
         self.btn_cancel.configure(state="disabled")
         self._stop_event.set()
 
+    def _refresh_model_menu(self):
+        """Rebuild the picker's labels and reapply the current selection.
+
+        Labels carry a "↓ 913 MB" badge for weights that aren't on disk, so they
+        go stale the moment a download finishes. Called at startup and after
+        every run, which is when that can have changed.
+        """
+        labels = [registry.menu_label(m) for m in self._models]
+        self._model_by_label = dict(zip(labels, self._models))
+        self.opt_model.configure(values=labels)
+        # Selection is tracked by model id, not label: the label may have just
+        # lost its download badge.
+        current = next(
+            (lbl for lbl, m in self._model_by_label.items() if m.id == self._selected_id),
+            labels[0],
+        )
+        self.opt_model.set(current)
+        self.update_model_desc(current)   # set() does not fire the command
+
+    def _model_meta_text(self, model):
+        """The small line under the description: download state, license, cost."""
+        parts = []
+        if model.downloadable:
+            if registry.is_installed(model):
+                parts.append("✓ Downloaded")
+            else:
+                parts.append(f"↓ {registry.format_size(registry.download_size(model))} on first use")
+            parts.append(f"License: {model.license}")
+        if model.cpu_x_realtime:
+            parts.append(f"~{model.cpu_x_realtime:g}× song length on CPU")
+        return "    ·    ".join(parts)
+
     def update_model_desc(self, choice):
-        description = self.MODEL_INFO.get(choice, "")
-        self.lbl_model_desc.configure(text=description)
-        # htdemucs_6s uses different stem names — Karaoke Mode is incompatible.
-        # Disable the checkbox (and clear it) so the user can't accidentally select both.
-        if choice == "htdemucs_6s":
+        model = self._model_by_label.get(choice)
+        if model is None:
+            return
+        self._selected_id = model.id
+        self.lbl_model_desc.configure(text=model.description)
+        self.lbl_model_meta.configure(text=self._model_meta_text(model))
+
+        # Karaoke Mode needs a clean vocals split. Models without one (the
+        # 6-stem Demucs, whose stem naming differs, and the guitar RoFormer)
+        # clear and disable the checkbox so the two can't both be selected.
+        if model.karaoke:
+            self.chk_karaoke.configure(state="normal")
+        else:
             self.chk_karaoke.deselect()
             self.chk_karaoke.configure(state="disabled")
-        else:
-            self.chk_karaoke.configure(state="normal")
+
+        credit, url = self._ENGINE_CREDIT.get(model.engine, self._ENGINE_CREDIT["demucs"])
+        self.lbl_attribution.configure(text=credit)
+        self._attribution_url = url
 
 if __name__ == "__main__":
     app = App()

@@ -328,6 +328,17 @@ def get_engine(engine_name):
         )
 
 
+def available_models():
+    """Registry models this build can actually run, in catalog order.
+
+    The registry catalogs models whose engine isn't wired yet (see its docstring)
+    — those must never reach the picker, or selecting one would fail only once
+    the user pressed Separate. Which engines exist is knowledge that lives here,
+    not in the (torch-free) registry, so the filter does too.
+    """
+    return tuple(m for m in registry.all_models() if m.engine in _ENGINES)
+
+
 def engine_for_model(model_name):
     """Resolve the engine name for *model_name* via the registry.
 

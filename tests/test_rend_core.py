@@ -7,12 +7,14 @@ import pytest
 import soundfile as sf
 import torch
 
+import registry
 import rend_core
 from rend_core import (
     DemucsEngine,
     Engine,
     RoformerEngine,
     SeparationThread,
+    available_models,
     engine_for_model,
     get_engine,
     karaoke_mixdown,
@@ -197,6 +199,31 @@ def test_get_engine_unwired_engine_raises_clear_error():
     # BS-RoFormer is catalogued but its architecture isn't vendored yet.
     with pytest.raises(ValueError, match="bs_roformer"):
         get_engine("bs_roformer")
+
+
+def test_available_models_excludes_unwired_engines():
+    # bs_roformer_sw is catalogued but its architecture isn't vendored. If it
+    # reached the picker, choosing it would fail only after the user pressed
+    # Separate — so it must be filtered out here.
+    ids = {m.id for m in available_models()}
+    assert "bs_roformer_sw" not in ids
+
+
+def test_available_models_includes_every_wired_model():
+    ids = {m.id for m in available_models()}
+    assert {"htdemucs", "mdx_q"} <= ids                      # demucs engine
+    assert {"melband_guitar", "melband_instrumental"} <= ids  # roformer engine
+
+
+def test_every_available_model_resolves_to_a_usable_engine():
+    # The guarantee the picker relies on: anything offered can actually run.
+    for m in available_models():
+        assert isinstance(get_engine(engine_for_model(m.id)), Engine)
+
+
+def test_available_models_preserves_catalog_order():
+    ordered = [m.id for m in registry.all_models() if m.id != "bs_roformer_sw"]
+    assert [m.id for m in available_models()] == ordered
 
 
 def test_engine_for_model_maps_demucs_models():

@@ -7,10 +7,13 @@ from registry import (
     Model,
     ModelFile,
     demucs_models,
+    download_size,
     downloadable_models,
+    files_status,
+    format_size,
     get_model,
     is_installed,
-    files_status,
+    menu_label,
 )
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -48,8 +51,9 @@ def test_four_stem_models_expose_vocals():
 
 
 def test_six_stem_model_is_not_karaoke_capable():
-    # Matches app.py: htdemucs_6s uses different stem naming at runtime and is
-    # deliberately excluded from Karaoke Mode.
+    # htdemucs_6s uses different stem naming at runtime and is deliberately
+    # excluded from Karaoke Mode. app.py drives its checkbox off this flag, so
+    # this is the whole rule, not a copy of one.
     assert get_model("htdemucs_6s").karaoke is False
 
 
@@ -162,6 +166,56 @@ def test_files_status_shapes_for_both_kinds():
 
     dl = files_status(get_model("bs_roformer_sw"))
     assert dl["managed"] is False and dl["redistributable"] is False
+
+
+# ── Picker labels ─────────────────────────────────────────────────────────────
+# app.py keys its label → Model map on these strings and cannot be imported in
+# CI (it pulls in customtkinter), so the picker's naming is pinned here.
+
+def test_every_model_has_a_short_name():
+    for m in registry.all_models():
+        assert m.short_name, f"{m.id} has no short_name for the picker"
+
+
+def test_short_names_are_unique():
+    # Labels are dictionary keys in the picker: a collision would make one
+    # model unselectable.
+    names = [m.short_name for m in registry.all_models()]
+    assert len(names) == len(set(names))
+
+
+def test_menu_labels_are_unique():
+    labels = [menu_label(m) for m in registry.all_models()]
+    assert len(labels) == len(set(labels))
+
+
+def test_menu_label_of_engine_managed_model_is_just_its_name():
+    # Demucs fetches its own weights, so there is no Rend download to announce.
+    assert menu_label(get_model("htdemucs")) == "Demucs v4"
+
+
+def test_menu_label_flags_a_pending_download(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "MODELS_DIR", tmp_path)
+    label = menu_label(get_model("melband_instrumental"))
+    assert label.startswith("RoFormer Vocals")
+    assert "913 MB" in label and "↓" in label
+
+
+def test_menu_label_drops_the_badge_once_installed(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "MODELS_DIR", tmp_path)
+    model = _tiny_downloadable_model(size=3)
+    (tmp_path / "tiny.bin").write_bytes(b"abc")
+    assert menu_label(model) == "Tiny test model"   # no short_name → display_name
+
+
+def test_download_size_sums_every_file():
+    assert download_size(get_model("melband_guitar")) == 45142183
+    assert download_size(get_model("htdemucs")) == 0   # manages no files
+
+
+def test_format_size_uses_decimal_mb():
+    # Decimal MB matches what HuggingFace reports for these checkpoints.
+    assert format_size(913106900) == "913 MB"
 
 
 # ── Model dataclass basics ────────────────────────────────────────────────────
