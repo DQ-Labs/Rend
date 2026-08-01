@@ -7,8 +7,11 @@ lazily inside SeparationThread.run() because demucs is installed from source
 """
 
 import os
+import shutil
 import socket
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -17,6 +20,8 @@ import torch
 import soundfile as sf
 
 import config
+import downloader
+import registry
 
 LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), config.APP_NAME, "error.log")
 
@@ -68,29 +73,62 @@ def karaoke_mixdown(separated, model_name):
     return {"vocals": vocals, "accompaniment": accompaniment}
 
 
-def save_stems(separated, output_folder, samplerate):
-    """Save each stem tensor as <stem>.wav in *output_folder*.
+# Output formats: (file extension, soundfile format, subtype).
+#   wav  — 32-bit float: preserves samples beyond +/-1.0 with zero loss, at
+#          the cost of large files. The summed karaoke accompaniment routinely
+#          overshoots +/-1.0, so this is the safe default.
+#   flac — 24-bit lossless PCM: ~half the size of float WAV. FLAC has no float
+#          subtype, so samples beyond +/-1.0 are clipped by libsndfile on write
+#          (only the karaoke accompaniment sum ever reaches that range).
+OUTPUT_FORMATS = {
+    "wav":  (".wav",  "WAV",  "FLOAT"),
+    "flac": (".flac", "FLAC", "PCM_24"),
+}
 
-    Saved manually via soundfile to avoid triggering any internal demucs
-    MP3 calls (see CONTEXT.md: never use TorchAudio or demucs' own save).
+
+def save_stems(separated, output_folder, samplerate, fmt="wav"):
+    """Save each stem tensor as <stem>.<ext> in *output_folder*.
+
+    *fmt* is a key of OUTPUT_FORMATS ("wav" or "flac"). Saved manually via
+    soundfile to avoid triggering any internal demucs MP3 calls (see
+    CONTEXT.md: never use TorchAudio or demucs' own save).
     """
+    try:
+        ext, sf_format, subtype = OUTPUT_FORMATS[fmt]
+    except KeyError:
+        raise ValueError(f"Unsupported output format: {fmt!r} (choose from {list(OUTPUT_FORMATS)})")
     os.makedirs(output_folder, exist_ok=True)
     for stem, source in separated.items():
-        filepath = os.path.join(output_folder, f"{stem}.wav")
+        filepath = os.path.join(output_folder, f"{stem}{ext}")
         # Convert to numpy and transpose for soundfile
         audio_np = source.cpu().numpy().transpose(1, 0)
-        # subtype="FLOAT": PCM_16 (the WAV default) hard-clips samples
-        # outside +/-1.0, which the summed accompaniment routinely exceeds
-        sf.write(filepath, audio_np, samplerate, subtype="FLOAT")
+        sf.write(filepath, audio_np, samplerate, format=sf_format, subtype=subtype)
+
+
+def ffmpeg_exe():
+    """Return the ffmpeg executable to invoke.
+
+    PATH first, then the copy shipped alongside the app — the PyInstaller bundle
+    dir when frozen, or the project root for source installs (where the README
+    tells users to drop ffmpeg.exe). Windows does not search the working
+    directory for executables, so the explicit fallback is what makes a source
+    install work at all.
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    local = os.path.join(base, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    return local if os.path.exists(local) else "ffmpeg"
 
 
 def check_ffmpeg():
-    """Return True if ffmpeg is runnable from PATH."""
+    """Return True if ffmpeg is runnable (PATH or bundled/project-root copy)."""
     try:
         # Prevent black window popping up on Windows
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         subprocess.run(
-            ["ffmpeg", "-version"],
+            [ffmpeg_exe(), "-version"],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -114,8 +152,206 @@ def check_online(host="dl.fbaipublicfiles.com", port=443, timeout=3):
         return False
 
 
+def select_device():
+    """Return "cuda" if an NVIDIA GPU is usable, else "cpu".
+
+    Demucs runs several times faster on a CUDA GPU. The probe is cheap and its
+    result is stable for the process lifetime, so callers may cache it. Any
+    failure (no torch CUDA build, driver mismatch) falls back to CPU rather
+    than raising.
+    """
+    try:
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
+# ── Separation engines ────────────────────────────────────────────────────────
+# A model's `engine` (see registry.py) selects how it runs. Only "demucs" is
+# wired today; the abstraction exists so a RoFormer/audio-separator engine can
+# be added later without touching SeparationThread. Each engine takes the
+# driving SeparationThread as its request context — it reads the input file,
+# resolved device, model name, and options from it, drives progress through
+# req.handle_progress, and writes the finished stems to req.output_folder.
+
+
+class Engine:
+    """Base class: turn req.input_file into stem files under req.output_folder."""
+    name = "base"
+
+    def separate(self, req):
+        raise NotImplementedError
+
+
+class DemucsEngine(Engine):
+    """In-process Demucs separation (demucs.api). Weights are auto-downloaded by
+    demucs on first use; the import is deferred so rend_core stays importable in
+    CI without demucs installed (see module docstring)."""
+    name = "demucs"
+
+    def separate(self, req):
+        import demucs.api  # deferred — see module docstring
+
+        # We explicitly do NOT ask for MP3 support here to avoid the missing
+        # library crash. shifts=1 is default, >1 is slower but better quality.
+        separator = demucs.api.Separator(
+            model=req.model_name,
+            device=req.device,
+            shifts=req.shifts,
+            progress=False,   # tqdm writes to stderr which is a DummyStream in --noconsole mode;
+                              # our callback drives the progress bar instead
+            callback=req.handle_progress,
+        )
+
+        req.callback(f"Loading {req.model_name} on {req.device.upper()}... (First run takes time)", 0.1)
+        origin, separated = separator.separate_audio_file(req.input_file)
+
+        req.callback(f"Saving {req.output_format.upper()} files...", 0.9)
+        # Karaoke Mode: reduce to vocals + accompaniment before saving.
+        if req.two_stems:
+            separated = karaoke_mixdown(separated, req.model_name)
+        save_stems(separated, req.output_folder, separator.samplerate, req.output_format)
+
+
+def decode_audio(path, target_sr, channels=2):
+    """Decode *path* to a float32 (channels, samples) tensor at *target_sr*.
+
+    Routed through the bundled ffmpeg so every input Rend accepts (MP3/WAV/FLAC)
+    is handled — along with resampling and channel normalization — without
+    adding a resampler dependency.
+    """
+    fd, tmp_wav = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    try:
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        subprocess.run(
+            [ffmpeg_exe(), "-v", "error", "-y", "-i", path,
+             "-ac", str(channels), "-ar", str(target_sr), "-c:a", "pcm_f32le", tmp_wav],
+            check=True, capture_output=True, creationflags=creationflags,
+        )
+        data, _ = sf.read(tmp_wav, dtype="float32", always_2d=True)  # (frames, channels)
+    finally:
+        try:
+            os.remove(tmp_wav)
+        except OSError:
+            pass
+    return torch.from_numpy(data.T.copy())  # (channels, samples)
+
+
+class RoformerEngine(Engine):
+    """In-process RoFormer separation using the vendored architecture.
+
+    Only the checkpoint is downloaded (sha256-verified, on first use); the model
+    code and config are vendored in roformer_source/, so this needs no external
+    tool and runs in Rend's own environment — which also gives real per-chunk
+    progress and cancellation, like the demucs engine.
+    """
+    name = "roformer"
+
+    def separate(self, req):
+        # Deferred so the vendored model code is imported only when a RoFormer
+        # model actually runs.
+        from roformer_source import inference as roformer_inference
+        from roformer_source import model_configs
+
+        model_rec = registry.get_model(req.model_name)
+        if model_rec is None or not model_rec.arch_config:
+            raise ValueError(f"Model {req.model_name!r} has no vendored RoFormer config.")
+        cfg = model_configs.get_config(model_rec.arch_config)
+
+        # 1. Weights — downloaded on first use, rejected on sha256 mismatch.
+        if not registry.is_installed(model_rec):
+            def dl_progress(done, total):
+                frac = (done / total) if total else 0.0
+                req.callback(f"Downloading model... {int(frac * 100)}%", 0.02 + 0.08 * frac)
+
+            req.callback(f"Downloading {model_rec.display_name}...", 0.02)
+            downloader.download_model(model_rec, progress=dl_progress)
+
+        req.callback(f"Loading {model_rec.display_name} on {req.device.upper()}...", 0.1)
+        model = roformer_inference.build_model(cfg)
+        missing, _unexpected = roformer_inference.load_checkpoint(
+            model, str(registry.model_file_path(model_rec.files[0])), device=req.device,
+        )
+        if missing:
+            raise RuntimeError(
+                f"Checkpoint does not match the vendored architecture "
+                f"({len(missing)} missing keys, e.g. {missing[:3]})."
+            )
+        model.eval().to(req.device)
+
+        # 2. Decode at the model's sample rate.
+        sr = cfg["audio"]["sample_rate"]
+        audio = decode_audio(req.input_file, sr)
+
+        # 3. Chunked inference, reported into the same 0.15-0.88 band as demucs.
+        target = roformer_inference.separate_chunked(
+            model, audio,
+            chunk_size=cfg["audio"]["chunk_size"],
+            num_overlap=cfg["inference"]["num_overlap"],
+            progress=lambda frac: req.callback("Separating...", progress_fraction(frac, 1.0)),
+            should_stop=req.stop_event.is_set,
+            device=req.device,
+        )
+
+        # 4. A num_stems=1 model predicts the target; the rest is the remainder.
+        req.callback(f"Saving {req.output_format.upper()} files...", 0.9)
+        stems = {cfg["stems"]["target"]: target,
+                 cfg["stems"]["complement"]: audio - target}
+        # A vocals/instrumental model is already a karaoke split. When Karaoke
+        # Mode is on, use Rend's established naming so the output matches what
+        # the demucs path produces.
+        if req.two_stems and {"instrumental", "vocals"} <= set(stems):
+            stems["accompaniment"] = stems.pop("instrumental")
+        save_stems(stems, req.output_folder, sr, req.output_format)
+
+
+_ENGINES = {
+    DemucsEngine.name: DemucsEngine,
+    RoformerEngine.name: RoformerEngine,
+}
+
+
+def get_engine(engine_name):
+    """Return an Engine instance for *engine_name*.
+
+    Raises ValueError for a known-but-unwired engine (e.g. "roformer" before its
+    phase lands), so the failure is a clear message rather than a KeyError.
+    """
+    try:
+        return _ENGINES[engine_name]()
+    except KeyError:
+        raise ValueError(
+            f"The '{engine_name}' engine is not available in this build yet."
+        )
+
+
+def available_models():
+    """Registry models this build can actually run, in catalog order.
+
+    The registry catalogs models whose engine isn't wired yet (see its docstring)
+    — those must never reach the picker, or selecting one would fail only once
+    the user pressed Separate. Which engines exist is knowledge that lives here,
+    not in the (torch-free) registry, so the filter does too.
+    """
+    return tuple(m for m in registry.all_models() if m.engine in _ENGINES)
+
+
+def engine_for_model(model_name):
+    """Resolve the engine name for *model_name* via the registry.
+
+    Unknown names default to "demucs" so a raw Demucs model string (or any
+    future demucs variant not yet catalogued) still runs.
+    """
+    model = registry.get_model(model_name)
+    return model.engine if model else "demucs"
+
+
 class SeparationThread(threading.Thread):
-    def __init__(self, input_file, output_folder, model_name, shifts, two_stems, callback, stop_event):
+    def __init__(self, input_file, output_folder, model_name, shifts, two_stems,
+                 callback, stop_event, device=None, output_format="wav"):
         super().__init__()
         self.input_file = input_file
         self.output_folder = output_folder
@@ -124,36 +360,22 @@ class SeparationThread(threading.Thread):
         self.two_stems = two_stems
         self.callback = callback
         self.stop_event = stop_event
+        # device=None → auto-detect at run time; output_format is a save_stems key
+        self.device = device
+        self.output_format = output_format
 
     def run(self):
         try:
-            import demucs.api  # deferred — see module docstring
+            # Auto-detect the device (CUDA GPU when present) unless one was
+            # passed in; falls back to CPU, which is the safe default. Resolved
+            # once here so the engine sees a concrete device string.
+            self.device = self.device or select_device()
 
-            # 1. Configure the Separator
-            # device="cpu" is safer for compatibility.
-            # We explicitly do NOT ask for MP3 support here to avoid the missing library crash.
-            # shifts=1 is default, >1 is slower but better quality
-            separator = demucs.api.Separator(
-                model=self.model_name,
-                device="cpu",
-                shifts=self.shifts,
-                progress=False,   # tqdm writes to stderr which is a DummyStream in --noconsole mode;
-                                  # our callback drives the progress bar instead
-                callback=self.handle_progress
-            )
-
-            # 2. Start Separation
-            self.callback(f"Loading {self.model_name}... (First run takes time)", 0.1)
-            origin, separated = separator.separate_audio_file(self.input_file)
-
-            # 3. Save the Stems
-            self.callback("Saving WAV files...", 0.9)
-
-            # Karaoke Mode: If two_stems is True, we want "vocals" and "accompaniment"
-            if self.two_stems:
-                separated = karaoke_mixdown(separated, self.model_name)
-
-            save_stems(separated, self.output_folder, separator.samplerate)
+            # Dispatch to the engine this model uses (only "demucs" is wired
+            # today). The engine reads its inputs and options from `self` and
+            # writes the finished stems into self.output_folder.
+            engine = get_engine(engine_for_model(self.model_name))
+            engine.separate(self)
 
             self.callback("Done!", 1.0)
 

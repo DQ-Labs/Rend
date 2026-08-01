@@ -11,7 +11,7 @@ installed.
 """
 
 APP_NAME = "Rend"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 APP_TAGLINE = "AI Music Stem Separator"
 BUNDLE_ID = "com.dqlabs.rend"
 AUTHOR = "DQ-Labs"
@@ -25,6 +25,7 @@ BUG_REPORT_URL = f"{REPO_URL}/issues/new?template=bug_report.md"
 # Load-bearing dependencies shown in the About pane: (name, license, url)
 CREDITS = [
     ("Demucs", "MIT — Meta AI Research", "https://github.com/adefossez/demucs"),
+    ("Mel-Band RoFormer", "MIT — lucidrains / ZFTurbo", "https://github.com/lucidrains/BS-RoFormer"),
     ("PyTorch", "BSD-3-Clause", "https://pytorch.org"),
     ("CustomTkinter", "MIT", "https://github.com/TomSchimansky/CustomTkinter"),
     ("python-soundfile", "BSD-3-Clause", "https://github.com/bastibe/python-soundfile"),
