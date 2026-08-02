@@ -1,8 +1,10 @@
 import os
 import sys
+import gc
 import math
 import time
 import threading
+import traceback
 import tkinter as tk
 
 import config
@@ -64,6 +66,10 @@ class _AnimatedSplash:
 
         self._t0      = time.time()
         self._running = True
+        # Pending after() ids, so they can be cancelled before the interpreter
+        # is torn down (see close()).
+        self._tick_id = None
+        self._poll_id = None
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -106,12 +112,12 @@ class _AnimatedSplash:
             self._canvas.coords(oval, x - size, y - size, x + size, y + size)
             self._canvas.itemconfig(oval, fill=self._lerp_color(opacity))
 
-        self._root.after(16, self._tick)   # ~60 fps
+        self._tick_id = self._root.after(16, self._tick)   # ~60 fps
 
     # ── public API ────────────────────────────────────────────────────────────
 
     def wait(self, event: threading.Event):
-        """Start animating; block until *event* is set, then destroy."""
+        """Start animating; block until *event* is set, then tear down."""
         self._tick()
 
         def _poll():
@@ -119,10 +125,28 @@ class _AnimatedSplash:
                 self._running = False
                 self._root.quit()
             else:
-                self._root.after(100, _poll)
+                self._poll_id = self._root.after(100, _poll)
 
         _poll()
         self._root.mainloop()
+        self.close()
+
+    def close(self):
+        """Cancel pending callbacks and destroy the splash's interpreter.
+
+        quit() only exits mainloop — it leaves already-queued after() callbacks
+        in the Tcl event queue, and destroying the interpreter with a _tick
+        still pending produces `invalid command name "..._tick"`. Cancel them
+        first so the teardown is clean.
+        """
+        for attr in ("_tick_id", "_poll_id"):
+            after_id = getattr(self, attr)
+            if after_id is not None:
+                try:
+                    self._root.after_cancel(after_id)
+                except tk.TclError:
+                    pass          # already fired or the interpreter is gone
+                setattr(self, attr, None)
         self._root.destroy()
 
 
@@ -145,7 +169,20 @@ def _load_heavy():
         _imports_done.set()   # always unblocks the splash, even on failure
 
 threading.Thread(target=_load_heavy, daemon=True).start()
-_AnimatedSplash().wait(_imports_done)
+
+# The splash gets its own Tcl interpreter, and that interpreter MUST be
+# finalized here, on the main thread. Left as garbage for CPython to collect
+# whenever, it is freed by whichever thread happens to trigger the next
+# collection — and the separation worker importing demucs allocates more than
+# enough to be that thread. Tcl detects the cross-thread teardown and aborts
+# the whole process with "Tcl_AsyncDelete: async handler deleted by the wrong
+# thread": no Python traceback, nothing in the error log, the window simply
+# vanishes the moment Separate is pressed. Holding a reference, closing it
+# explicitly and collecting right here keeps the teardown on this thread.
+_splash = _AnimatedSplash()
+_splash.wait(_imports_done)
+del _splash
+gc.collect()
 
 # If a dependency failed to import, tell the user and exit cleanly.
 if _import_error[0] is not None:
@@ -167,6 +204,7 @@ from rend_core import (
     available_models,
     check_ffmpeg,
     check_online,
+    log_error,
     output_folder_for,
     select_device,
 )
@@ -226,6 +264,10 @@ class App(ctk.CTk):
     _STATUS_WARN = "#ff9100"  # status light: warning / amber (e.g. offline)
     _STATUS_ERR  = "#ff3d00"  # status light: error / red
     _ZONE_ICON   = "#2e2e62"  # file zone icon (idle state)
+
+    # Class-level so report_callback_exception is safe even if a callback fires
+    # before __init__ has finished.
+    _reported_ui_error = False
 
     # Credit follows the engine actually selected — Demucs and the vendored
     # Mel-Band RoFormer are separate projects under separate copyrights.
@@ -531,6 +573,24 @@ class App(ctk.CTk):
 
         # Start Pre-Flight Check
         threading.Thread(target=self.run_diagnostics, daemon=True).start()
+
+    def report_callback_exception(self, exc, val, tb):
+        """Send exceptions raised inside widget callbacks to the error log.
+
+        Tk's default handler prints them to stderr — which is a DummyStream
+        under --noconsole — so a failure in any button or menu callback would
+        otherwise vanish without a trace. Only the first one raises a dialog:
+        a callback that fails once usually fails every time it is invoked, and
+        a loop of modal errors would be worse than the original fault.
+        """
+        log_error("".join(traceback.format_exception(exc, val, tb)))
+        if not self._reported_ui_error:
+            self._reported_ui_error = True
+            messagebox.showerror(
+                "Unexpected Error",
+                f"Something went wrong inside the interface:\n\n{val}\n\n"
+                f"Details were saved to:\n{LOG_FILE}",
+            )
 
     def run_diagnostics(self):
         ffmpeg_ok = check_ffmpeg()
