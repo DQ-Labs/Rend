@@ -1,4 +1,8 @@
 customtkinter==5.2.2
+# CTkImage needs Pillow to load the PNGs in assets/. CustomTkinter does NOT
+# declare it as a dependency (it only requires darkdetect + packaging), so
+# without this line the build succeeds and the app fails at runtime.
+pillow==12.1.0
 soundfile==0.13.1
 torch==2.9.1
 # RoFormer engine — in-process inference with the vendored architecture in

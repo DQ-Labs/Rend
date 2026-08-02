@@ -5,7 +5,11 @@ a = Analysis(
     ['app.py'],
     pathex=['.', 'demucs_source'],
     binaries=[('ffmpeg.exe', '.'), ('ffprobe.exe', '.')],
-    datas=[('demucs_source/demucs', 'demucs'), ('rend.ico', '.')],
+    datas=[
+        ('demucs_source/demucs', 'demucs'),
+        ('rend.ico', '.'),
+        ('assets', 'assets'),   # UI icons, loaded at runtime via resource_path()
+    ],
     hiddenimports=[
         # ── demucs submodules ─────────────────────────────────────────────────
         # PyInstaller only sees static imports; model classes are loaded via
