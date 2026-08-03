@@ -373,8 +373,15 @@ class App(ctk.CTk):
         # Size to what the layout actually needs rather than a hardcoded height.
         # Font metrics differ between machines, and a fixed number is what left
         # the status row clipped off the bottom in every release up to 1.3.0.
+        #
+        # winfo_reqheight() reports real pixels, which already include CTk's
+        # widget scaling, while CTk.geometry() applies window scaling to
+        # whatever it is given. Feeding one into the other double-scales the
+        # window — 900x600 becomes 1125x940 on a 125% display. Convert back to
+        # logical units so CTk's own scaling is applied exactly once.
         self.update_idletasks()
-        self.geometry(f"900x{self.winfo_reqheight()}")
+        scaling = ctk.ScalingTracker.get_widget_scaling(self) or 1.0
+        self.geometry(f"900x{math.ceil(self.winfo_reqheight() / scaling)}")
 
         # Start Pre-Flight Check
         threading.Thread(target=self.run_diagnostics, daemon=True).start()
@@ -696,9 +703,17 @@ class App(ctk.CTk):
         win = ctk.CTkToplevel(self, fg_color=self._WIN_BG)
         self._about_win = win
         win.title(f"About {config.APP_NAME}")
-        win.geometry("420x490")
+        win.geometry("420x560")
         win.resizable(False, False)
         win.transient(self)
+
+        # The 256px app icon, shown here rather than shipped unused — the window
+        # and taskbar icons come from rend.ico, not this PNG.
+        self._ico_app = ctk.CTkImage(
+            light_image=Image.open(resource_path(os.path.join("assets", "app_icon.png"))),
+            dark_image=Image.open(resource_path(os.path.join("assets", "app_icon.png"))),
+            size=(72, 72))
+        ctk.CTkLabel(win, image=self._ico_app, text="").pack(pady=(22, 8))
 
         ctk.CTkLabel(
             win, text=config.APP_NAME,
