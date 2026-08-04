@@ -37,6 +37,12 @@ The installer adds a Start-menu entry, installs to `Program Files\Rend`, and reg
 | `mdx` | ⚡⚡ | ⭐⭐⭐ | Classic. Trained on MusDB HQ. Solid baseline. |
 | `mdx_extra` | ⚡ | ⭐⭐⭐⭐ | High precision. Extra training data for complex mixes. |
 | `mdx_q` | ⚡⚡⚡ | ⭐⭐ | Quantized. Smallest download, lower quality. |
+| **RoFormer Vocals** | 🐢 | ⭐⭐⭐⭐⭐ | Cleanest vocal/instrumental split — the best option for karaoke and backing tracks. 913 MB download, ~5× song length on CPU, and **needs a machine with more than 8 GB RAM** (see below). |
+| **RoFormer Guitar** | 🐢 | ⭐⭐⭐⭐ | Guitar isolation, markedly cleaner than Demucs on distorted guitar. 45 MB download, ~3× song length on CPU. |
+
+The two RoFormer models are downloaded on first use from their author's own
+HuggingFace repository, not bundled: they are published without a license grant,
+so Rend shows the licence state and asks before fetching anything.
 
 ## Installation
 
@@ -114,6 +120,7 @@ The installer will be in `dist/installer/Rend-Setup-<version>.exe`. The script r
 - **First Launch**: The EXE may take ~30 seconds to start (PyInstaller one-file unpacking). Subsequent launches are faster.
 - **First Separation**: On the very first run, the app downloads the selected model (~200 MB–1 GB depending on model). This requires internet and takes a few minutes. All subsequent runs are fully offline.
 - **Windows SmartScreen**: The unsigned installer may trigger a warning when run. Click "More info" → "Run anyway" to proceed.
+- **Memory**: the Demucs models are happy in ~2 GB and run fine on an 8 GB machine. The **RoFormer models are far hungrier** — measured at 7.4 GB of 7.8 GB on an 8 GB laptop, which leaves Windows paging and a separation that effectively never finishes. On 8 GB, stick to the Demucs models; RoFormer wants 16 GB.
 
 ## Releasing (maintainers)
 

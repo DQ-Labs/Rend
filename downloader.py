@@ -52,11 +52,13 @@ def verify(model: registry.Model) -> dict:
     return {"verified": all(results.values()), "files": results}
 
 
-def download_file(f: registry.ModelFile, progress=None) -> Path:
+def download_file(f: registry.ModelFile, progress=None, should_stop=None) -> Path:
     """Download one ModelFile into MODELS_DIR, verifying its sha256.
 
     *progress*, if given, is called as progress(bytes_done, total_bytes) as the
-    file streams in. Returns the final path. Raises ValueError on a sha256
+    file streams in. *should_stop*, if given, is polled once per block and
+    raises KeyboardInterrupt when it returns True — the same signal the rest of
+    the cancel path uses. Returns the final path. Raises ValueError on a sha256
     mismatch (after removing the partial file); the destination is left
     untouched in that case.
     """
@@ -66,16 +68,27 @@ def download_file(f: registry.ModelFile, progress=None) -> Path:
 
     h = hashlib.sha256()
     fetched = 0
+    cancelled = False
     req = urllib.request.Request(
         f.url, headers={"User-Agent": f"{config.APP_NAME}/{config.APP_VERSION}"}
     )
     with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as out:
         while block := r.read(CHUNK):
+            # Checked per block rather than per file: these checkpoints run to
+            # 913 MB, and without this a cancel did nothing at all until the
+            # whole download finished.
+            if should_stop is not None and should_stop():
+                cancelled = True
+                break
             out.write(block)
             h.update(block)
             fetched += len(block)
             if progress:
                 progress(fetched, f.size)
+
+    if cancelled:
+        part.unlink(missing_ok=True)   # no resume, so a partial is dead weight
+        raise KeyboardInterrupt
 
     digest = h.hexdigest()
     if digest != f.sha256:
@@ -88,12 +101,13 @@ def download_file(f: registry.ModelFile, progress=None) -> Path:
     return dest
 
 
-def download_model(model: registry.Model, progress=None) -> None:
+def download_model(model: registry.Model, progress=None, should_stop=None) -> None:
     """Download every missing/invalid weight file of *model*.
 
     Files already present and valid are skipped (the download is resumable at
     file granularity). *progress* is called as progress(bytes_done, total_bytes)
     across the whole model, so a multi-file model reports one continuous bar.
+    *should_stop* is forwarded to each file so a cancel is honoured mid-stream.
     """
     if not model.downloadable:
         raise ValueError(f"model {model.id!r} has no Rend-managed weights to download")
@@ -113,5 +127,5 @@ def download_model(model: registry.Model, progress=None) -> None:
             if progress and total:
                 progress(_base + fetched, total)
 
-        download_file(f, progress=file_progress)
+        download_file(f, progress=file_progress, should_stop=should_stop)
         done_before += f.size

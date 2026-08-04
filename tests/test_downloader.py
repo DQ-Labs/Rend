@@ -147,3 +147,67 @@ def test_verify_detects_missing_file(tmp_path, monkeypatch):
 def test_download_model_rejects_engine_managed():
     with pytest.raises(ValueError, match="no Rend-managed weights"):
         download_model(registry.get_model("htdemucs"))
+
+
+# ── Cancellation ──────────────────────────────────────────────────────────────
+# Without a stop hook a cancel did nothing until the whole file landed, which on
+# the 913 MB checkpoint meant the app sat there looking hung. KeyboardInterrupt
+# is the signal the rest of the cancel path already uses.
+
+def test_download_file_honours_should_stop(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "MODELS_DIR", tmp_path / "models")
+    monkeypatch.setattr(downloader, "CHUNK", 4)   # force several blocks
+    f, _ = _served_file(tmp_path, data=b"x" * 64)
+
+    with pytest.raises(KeyboardInterrupt):
+        download_file(f, should_stop=lambda: True)
+
+
+def test_cancelled_download_leaves_nothing_behind(tmp_path, monkeypatch):
+    # No resume exists, so a stray .part would be dead weight on disk.
+    monkeypatch.setattr(registry, "MODELS_DIR", tmp_path / "models")
+    monkeypatch.setattr(downloader, "CHUNK", 4)
+    f, _ = _served_file(tmp_path, data=b"x" * 64)
+
+    with pytest.raises(KeyboardInterrupt):
+        download_file(f, should_stop=lambda: True)
+
+    dest = registry.model_file_path(f)
+    assert not dest.exists()
+    assert not dest.with_suffix(dest.suffix + ".part").exists()
+    assert list((tmp_path / "models").glob("*")) == []
+
+
+def test_download_file_stops_partway_not_only_at_the_start(tmp_path, monkeypatch):
+    # Guards against a hook that is only consulted before the first block.
+    monkeypatch.setattr(registry, "MODELS_DIR", tmp_path / "models")
+    monkeypatch.setattr(downloader, "CHUNK", 4)
+    f, _ = _served_file(tmp_path, data=b"x" * 64)
+
+    seen = []
+
+    def stop_after_three_blocks():
+        seen.append(1)
+        return len(seen) > 3
+
+    with pytest.raises(KeyboardInterrupt):
+        download_file(f, should_stop=stop_after_three_blocks)
+    assert len(seen) == 4          # polled per block, not once
+
+
+def test_download_file_completes_when_stop_stays_false(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "MODELS_DIR", tmp_path / "models")
+    f, data = _served_file(tmp_path)
+    path = download_file(f, should_stop=lambda: False)
+    assert path.read_bytes() == data
+
+
+def test_download_model_forwards_should_stop(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "MODELS_DIR", tmp_path / "models")
+    monkeypatch.setattr(downloader, "CHUNK", 4)
+    f, _ = _served_file(tmp_path, data=b"y" * 40)
+    model = Model("one", "One", "roformer", ("vocals",), "download",
+                  karaoke=True, files=(f,), redistributable=False)
+
+    with pytest.raises(KeyboardInterrupt):
+        download_model(model, should_stop=lambda: True)
