@@ -194,6 +194,14 @@ class DemucsEngine(Engine):
     def separate(self, req):
         import demucs.api  # deferred — see module docstring
 
+        # Reported BEFORE the Separator is built, because that constructor is
+        # what fetches the weights on first use — mdx is a bag of four models,
+        # about 650 MB — and this message used to be emitted *after* it. So the
+        # entire download ran with the UI showing no status change, no progress
+        # and every control disabled: indistinguishable from a hang, and the
+        # phase a user is most likely to try to cancel.
+        req.callback(f"Preparing {req.model_name} (first run downloads model weights)...", 0.05)
+
         # We explicitly do NOT ask for MP3 support here to avoid the missing
         # library crash. shifts=1 is default, >1 is slower but better quality.
         separator = demucs.api.Separator(
@@ -205,7 +213,13 @@ class DemucsEngine(Engine):
             callback=req.handle_progress,
         )
 
-        req.callback(f"Loading {req.model_name} on {req.device.upper()}... (First run takes time)", 0.1)
+        # demucs downloads through torch.hub, which offers no cancellation hook,
+        # so a stop asked for during that download can only be honoured here —
+        # but honour it we must, rather than separating a cancelled track.
+        if req.stop_event.is_set():
+            raise KeyboardInterrupt
+
+        req.callback(f"Loading {req.model_name} on {req.device.upper()}...", 0.1)
         origin, separated = separator.separate_audio_file(req.input_file)
 
         req.callback(f"Saving {req.output_format.upper()} files...", 0.9)
@@ -268,7 +282,8 @@ class RoformerEngine(Engine):
                 req.callback(f"Downloading model... {int(frac * 100)}%", 0.02 + 0.08 * frac)
 
             req.callback(f"Downloading {model_rec.display_name}...", 0.02)
-            downloader.download_model(model_rec, progress=dl_progress)
+            downloader.download_model(model_rec, progress=dl_progress,
+                                      should_stop=req.stop_event.is_set)
 
         req.callback(f"Loading {model_rec.display_name} on {req.device.upper()}...", 0.1)
         model = roformer_inference.build_model(cfg)
@@ -282,9 +297,18 @@ class RoformerEngine(Engine):
             )
         model.eval().to(req.device)
 
+        # Loading a 913 MB checkpoint and decoding are both uninterruptible, so
+        # check between phases; otherwise a cancel asked for during either sits
+        # unhonoured until the first chunk boundary.
+        if req.stop_event.is_set():
+            raise KeyboardInterrupt
+
         # 2. Decode at the model's sample rate.
         sr = cfg["audio"]["sample_rate"]
         audio = decode_audio(req.input_file, sr)
+
+        if req.stop_event.is_set():
+            raise KeyboardInterrupt
 
         # 3. Chunked inference, reported into the same 0.15-0.88 band as demucs.
         target = roformer_inference.separate_chunked(

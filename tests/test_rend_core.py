@@ -226,6 +226,70 @@ def test_available_models_preserves_catalog_order():
     assert [m.id for m in available_models()] == ordered
 
 
+# ── Demucs first-run weight download ──────────────────────────────────────────
+# demucs fetches its weights inside Separator(), which for `mdx` is a bag of
+# four models (~650 MB). The status line announcing it used to be emitted after
+# that constructor returned, so the whole download ran with the UI showing no
+# change at all — it read as a hang, and it is where users try to cancel.
+
+def _fake_demucs(monkeypatch, events, on_construct=None):
+    """Install a stand-in demucs.api that records when it is constructed."""
+    import sys
+    import types
+
+    demucs_mod = types.ModuleType("demucs")
+    api_mod = types.ModuleType("demucs.api")
+
+    class FakeSeparator:
+        samplerate = 44100
+
+        def __init__(self, **kwargs):
+            events.append("construct")      # stands in for the weight download
+            if on_construct is not None:
+                on_construct()
+
+        def separate_audio_file(self, path):
+            events.append("separate")
+            return None, {"vocals": torch.zeros(2, 64), "drums": torch.zeros(2, 64)}
+
+    api_mod.Separator = FakeSeparator
+    demucs_mod.api = api_mod
+    monkeypatch.setitem(sys.modules, "demucs", demucs_mod)
+    monkeypatch.setitem(sys.modules, "demucs.api", api_mod)
+
+
+def _demucs_request(tmp_path, stop_event, events):
+    return SeparationThread(
+        input_file="song.mp3", output_folder=str(tmp_path), model_name="mdx",
+        shifts=1, two_stems=False,
+        callback=lambda status, frac: events.append(f"status:{status}"),
+        stop_event=stop_event, device="cpu", output_format="wav",
+    )
+
+
+def test_demucs_reports_status_before_downloading_weights(monkeypatch, tmp_path):
+    events = []
+    _fake_demucs(monkeypatch, events)
+    DemucsEngine().separate(_demucs_request(tmp_path, threading.Event(), events))
+
+    assert events[0].startswith("status:Preparing"), (
+        f"first thing the user sees must precede the download, got {events[0]!r}")
+    assert events[1] == "construct"
+
+
+def test_demucs_honours_a_cancel_asked_for_during_the_download(monkeypatch, tmp_path):
+    # torch.hub offers no cancellation hook, so a stop requested mid-download can
+    # only be honoured once the constructor returns — but it must be.
+    events = []
+    stop = threading.Event()
+    _fake_demucs(monkeypatch, events, on_construct=stop.set)
+
+    with pytest.raises(KeyboardInterrupt):
+        DemucsEngine().separate(_demucs_request(tmp_path, stop, events))
+
+    assert "separate" not in events, "separated a track the user had cancelled"
+
+
 def test_engine_for_model_maps_demucs_models():
     assert engine_for_model("htdemucs") == "demucs"
     assert engine_for_model("mdx_extra") == "demucs"
