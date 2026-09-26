@@ -10,6 +10,13 @@ on:
     branches:
       - main
 
+# Read-only by default. Only the release job, which runs nothing but the
+# download and publish steps, gets a write-scoped token. The test and build
+# jobs execute third-party code (pip installs, Chocolatey, the cloned demucs
+# setup.py) and must never hold a token that can push to the repo.
+permissions:
+  contents: read
+
 jobs:
   # Headless tests against rend_core (no GUI, no demucs, no model downloads).
   # Runs on every push and PR; the build job only starts after tests pass.
@@ -19,6 +26,9 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
+        with:
+          # Don't leave the job token in .git/config for later steps to read.
+          persist-credentials: false
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
@@ -37,12 +47,12 @@ jobs:
   build:
     needs: test
     runs-on: windows-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v6
@@ -134,8 +144,24 @@ jobs:
           name: Rend-Windows-Installer
           path: dist/installer/Rend-Setup-*.exe
 
+  release:
+    # Tag pushes only, after a green build. The one job with a write token,
+    # and it runs no project or third-party build code.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Build Artifact
+        # v8 fails the run on an artifact digest mismatch by default.
+        uses: actions/download-artifact@v8
+        with:
+          name: Rend-Windows-Installer
+          path: dist/installer
+
       - name: Draft GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
         with:
           # Draft so the artifact can be install-tested on a clean machine
