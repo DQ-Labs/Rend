@@ -11,7 +11,7 @@ installed.
 """
 
 APP_NAME = "Rend"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 APP_TAGLINE = "AI Music Stem Separator"
 BUNDLE_ID = "com.dqlabs.rend"
 AUTHOR = "DQ-Labs"
