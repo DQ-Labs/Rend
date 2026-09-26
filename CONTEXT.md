@@ -1,83 +1,58 @@
-# Project: Rend (Music Separation App)
+# Rend — context for contributors and coding agents
 
-## Current State (v0.9)
+Windows GUI for AI music stem separation. Two engines — Demucs and a vendored
+Mel-Band RoFormer — behind one CustomTkinter shell, shipped as a PyInstaller
+one-file EXE inside an Inno Setup installer. Current version: see `config.py`
+(the single source of truth; CI refuses a tag that doesn't match it).
 
-**Status**: Feature-complete. Working toward v1.0 final release with hygiene polish.
+The README covers features, install and releasing. This file is the part a
+change is most likely to break.
 
-- Fully functional Windows GUI using CustomTkinter (dark mode, responsive threading)
-- Animated math-curve (Rose Orbit) splash screen during startup
-- 6 Demucs model options (htdemucs, htdemucs_ft, htdemucs_6s, mdx, mdx_extra, mdx_q)
-- Karaoke mode (2-stem output: vocals + accompaniment)
-- High quality mode (shifts=2 for slower but higher-precision separation)
-- Cancel button to abort processing at segment boundaries
-- Open output folder directly from completion dialog
-- Real-time status lights (FFmpeg, Online connectivity)
-- WAV export via soundfile (no TorchAudio/lameenc dependencies)
-- CPU-only execution for universal Windows compatibility
-- PyInstaller one-file EXE with bundled FFmpeg and Demucs source
-- MIT licensed
+## Layout
 
-## Critical Constraints (DO NOT BREAK)
+| File | Role |
+|---|---|
+| `config.py` | Identity: name, version, URLs, credits. Dependency-free (CI imports it bare). |
+| `registry.py` | Model catalog — engine, stems, karaoke/High Quality applicability, download URL/size/sha256/license. Stdlib only. |
+| `downloader.py` | SHA256-verified weight downloads (`.part` → verify → atomic replace), cancellable per block. Stdlib only. |
+| `rend_core.py` | Engines (`DemucsEngine`, `RoformerEngine`), `SeparationThread`, stem saving, output folders, diagnostics. No GUI imports. |
+| `roformer_source/` | Vendored Mel-Band RoFormer architecture + chunked inference (MIT lineage in `mel_band_roformer.py`). |
+| `app.py` | The CustomTkinter shell, splash screen, license gate. Not importable in CI. |
+| `tests/` | Headless tests for everything except `app.py`; CI runs them before any build. |
 
-1. **Patched Demucs**: Using fork at commit e976d93 with `lameenc` and `torchaudio` requirements removed. Never update without testing.
-2. **Audio Export**: Always use `soundfile` to save WAV. Never use TorchAudio or internal Demucs save (causes hangs/crashes).
-3. **Threading**: GUI must stay responsive during separation. All heavy work on daemon threads with `self.after()` for UI updates.
-4. **No DummyStream Methods**: `DummyStream` (for `--noconsole` mode) lacks `isatty()`. Must set `progress=False` on Separator to avoid tqdm calling it.
-5. **Offline Execution**: After first model download, app works fully offline. No API calls during separation.
+## Constraints (do not break)
 
-## Resolved in v0.7–v0.9
+1. **Patched Demucs at a pinned commit.** `setup_dev.ps1` and CI clone
+   facebookresearch/demucs at `e976d93` and strip `lameenc`/`torchaudio` from
+   its requirements. Never bump it without a full separation test.
+2. **Save stems with `soundfile` only** — never TorchAudio or demucs' own save,
+   which hang or crash in the windowed build.
+3. **The GUI thread never blocks.** Heavy work runs on daemon threads; the UI is
+   only touched via `self.after(...)` from the main thread.
+4. **Windowed builds have no real stdout/stderr.** `app.py` installs a
+   `DummyStream`; demucs runs with `progress=False` so tqdm never probes it.
+   Tk callback errors go to `%LOCALAPPDATA%\Rend\error.log`.
+5. **The splash owns a second Tcl interpreter and must be destroyed and
+   garbage-collected on the main thread** before the app window is built.
+   Otherwise a worker thread can free it and Tcl aborts the whole process
+   (`Tcl_AsyncDelete: async handler deleted by the wrong thread`).
+6. **demucs finds ffmpeg through PATH only**, so `app.py` prepends the app
+   directory to PATH at startup. Rend's own `ffmpeg_exe()` searches more
+   places — when fixing a lookup, check whether vendored code does it the same way.
+7. **Checkpoints load with `torch.load(..., weights_only=True)`** — they come
+   from third-party repos, and a plain load would execute arbitrary pickle code.
+8. **Never bundle or rehost model weights.** RoFormer checkpoints are published
+   without a license grant (`redistributable=False` in the registry); Rend only
+   downloads them on demand from the author's repo, after the license gate.
+9. **Offline after first use.** No network calls during separation; only the
+   first use of a model downloads its weights.
 
-✅ **v0.7 (Criticals 1–3)**
-- Animated splash during import phase
-- Dynamic error handling in splash load
-- Model description legibility and UI polish
-- Bottom clipping fixed (720px window)
-- Attribution text restored
+## Things that look wrong but aren't
 
-✅ **v0.7.2 (Criticals 4–5 + License)**
-- `progress=False` fix (tqdm + DummyStream incompatibility)
-- Karaoke guard for htdemucs_6s (different stem names)
-- MIT License + Demucs attribution
-
-✅ **v0.8 (Must-Haves)**
-- WM_DELETE_WINDOW crash fixed (confirmation dialog)
-- Progress bar freeze fixed (use `segment_offset` key)
-- FFmpeg tooltip/diagnostic dialog
-- README button label updated
-- Pre-flight diagnostics (FFmpeg, Online status)
-
-✅ **v0.9 (Nice-to-Haves)**
-- Cancel button with threading.Event
-- Open output folder from completion dialog
-- Dead code cleanup (splash.png, generate_splash.py)
-- File zone reset after successful run
-- CI double-trigger fixed (release:[published] only)
-- README rewrite (current features, no outdated screenshots)
-
-## Goals for v1.0
-
-- ✅ All features complete and tested
-- ⚙️ Hygiene pass (README, CONTEXT.md, CI, documentation)
-- 🎯 Final testing and validation
-- 📦 Release to GitHub
-
-## Architecture Notes
-
-- **Splash Screen**: tkinter Tk window with Canvas animation (Rose Orbit curve, 72 particles, ~60fps) on main thread. Blocks until daemon thread finishes imports.
-- **Separation Thread**: `SeparationThread(threading.Thread)` wraps Demucs API. Checks `_stop_event` in `handle_progress` callback; raises `KeyboardInterrupt` to abort cleanly.
-- **UI Palette**: Dark theme with named color constants (`_WIN_BG`, `_ACCENT`, `_TXT_MID`, etc.) for easy tweaking.
-- **PyInstaller**: Spec file bundles FFmpeg, Demucs source in `demucs/` subdir, comprehensive `hiddenimports` for all Demucs modules and transitive deps.
-- **Resource Paths**: `resource_path()` handles both dev (current dir) and PyInstaller (`sys._MEIPASS`) modes.
-
-## Testing Checklist for v1.0
-
-- [ ] All 6 models separate correctly
-- [ ] Karaoke mode works (2 stems, no vocals KeyError)
-- [ ] High quality mode (shifts=2) completes without mdx_extra crash
-- [ ] Cancel button stops processing cleanly
-- [ ] Open folder dialog works on Windows
-- [ ] FFmpeg status light reflects actual availability
-- [ ] First-run model download doesn't hang
-- [ ] File zone resets after successful separation
-- [ ] EXE launches in ~30s, subsequent launches faster
-- [ ] No SmartScreen warning (unsigned, but expected)
+- **CPU-only installer.** A CUDA build exceeds GitHub's 2 GiB per-file release
+  limit and would unpack gigabytes per launch from a one-file EXE.
+  `select_device()` still uses CUDA on a source install with a CUDA torch.
+- **RoFormer needs ~16 GB RAM.** Measured 7.4 GB peak on an 8 GB machine, where
+  it pages indefinitely. Demucs is fine in ~2 GB. Documented in the README.
+- **Each run writes a fresh `<song>_stems (n)` folder**, by design — re-running
+  used to overwrite earlier stems and mix different runs' outputs.

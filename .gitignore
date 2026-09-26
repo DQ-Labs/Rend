@@ -11,5 +11,5 @@ demucs_source/
 *.wav
 *.flac
 
-# Claude Code local worktrees
-.claude/worktrees/
+# Claude Code local state (worktrees, per-machine settings) — never commit
+.claude/
