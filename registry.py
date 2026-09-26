@@ -59,6 +59,16 @@ class Model:
         """True if Rend fetches the weights itself (vs the engine managing them)."""
         return self.weights == "download"
 
+    @property
+    def supports_high_quality(self) -> bool:
+        """True if High Quality Mode changes anything for this model.
+
+        High Quality is demucs' `shifts=2` (averaging over time-shifted passes);
+        the RoFormer engine has no equivalent, so offering the checkbox there
+        would promise "2x slower, better" and deliver neither.
+        """
+        return self.engine == "demucs"
+
 
 # ── The catalog ───────────────────────────────────────────────────────────────
 # Built-in Demucs models: weights are auto-downloaded by demucs on first use, so

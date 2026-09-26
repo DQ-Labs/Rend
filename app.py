@@ -204,9 +204,9 @@ from rend_core import (
     SeparationThread,
     available_models,
     check_ffmpeg,
-    check_online,
+    check_hosts,
+    fresh_output_folder,
     log_error,
-    output_folder_for,
     select_device,
 )
 
@@ -354,7 +354,8 @@ class App(ctk.CTk):
         self._ico_download = load_icon("download_arrow.png", (13, 13), "white")
 
         self._ffmpeg_ok = None   # None = diagnostics pending, True/False after check
-        self._online_ok = None
+        self._online_ok = None   # True only if every download host is reachable
+        self._host_ok = {}       # {host: reachable}, from check_hosts()
         self._device = None      # "cuda"/"cpu", resolved by diagnostics
         self._about_win = None
         self._attribution_url = self._ENGINE_CREDIT["demucs"][1]
@@ -421,8 +422,10 @@ class App(ctk.CTk):
         self.lbl_device.bind("<Button-1>", self._on_device_click)
 
         self.lbl_online = ctk.CTkLabel(
-            right, text="● Online", font=(self.F, 11), text_color=self._TXT_DIM)
+            right, text="● Online", font=(self.F, 11),
+            text_color=self._TXT_DIM, cursor="hand2")
         self.lbl_online.grid(row=0, column=2, padx=(0, 16))
+        self.lbl_online.bind("<Button-1>", self._on_online_click)
 
         self.lbl_about = ctk.CTkLabel(
             right, text="About", font=(self.F, 11),
@@ -453,8 +456,12 @@ class App(ctk.CTk):
 
         self._zone_icon = ctk.CTkLabel(self._file_zone, image=self._ico_drop, text="")
         self._zone_icon.grid(row=1, column=0)
+        # "Choose", not "Drop": Tk has no native drag-and-drop, and adding it
+        # (tkinterdnd2) means another dependency and PyInstaller hook for a
+        # convenience. Until then the zone must not promise a drop that does
+        # nothing.
         self._zone_text = ctk.CTkLabel(
-            self._file_zone, text="Drop an audio file",
+            self._file_zone, text="Choose an audio file",
             font=(self.F, 15), text_color=self._TXT_HI, wraplength=300)
         self._zone_text.grid(row=2, column=0, pady=(14, 2))
         self._zone_sub = ctk.CTkLabel(
@@ -629,14 +636,16 @@ class App(ctk.CTk):
 
     def run_diagnostics(self):
         ffmpeg_ok = check_ffmpeg()
-        online_ok = check_online()
+        host_ok = check_hosts()
         device = select_device()
 
         # Schedule UI Update on Main Thread
-        self.after(1000, lambda: self.update_status_lights(ffmpeg_ok, online_ok, device))
+        self.after(1000, lambda: self.update_status_lights(ffmpeg_ok, host_ok, device))
 
-    def update_status_lights(self, ffmpeg_ok, online_ok, device):
+    def update_status_lights(self, ffmpeg_ok, host_ok, device):
         self._ffmpeg_ok = ffmpeg_ok
+        self._host_ok = host_ok
+        online_ok = all(host_ok.values())
         self._online_ok = online_ok
         self._device = device
         self.lbl_ffmpeg.configure(text_color=self._STATUS_OK if ffmpeg_ok else self._STATUS_ERR)
@@ -666,6 +675,20 @@ class App(ctk.CTk):
                 "and restart.\n\n"
                 "Windows builds: gyan.dev/ffmpeg/builds",
             )
+
+    def _on_online_click(self, event):
+        if not self._host_ok:
+            return  # diagnostics still running
+        lines = "\n".join(
+            f"{'●  reachable' if ok else '○  unreachable'}    {host}"
+            for host, ok in self._host_ok.items()
+        )
+        messagebox.showinfo(
+            "Download hosts",
+            "Models download their weights on first use from:\n\n"
+            f"{lines}\n\n"
+            "Models already downloaded work offline.",
+        )
 
     def _on_device_click(self, event):
         if self._device is None:
@@ -736,7 +759,7 @@ class App(ctk.CTk):
         else:
             health_text, health_color = "● FFmpeg missing", self._STATUS_ERR
         if self._online_ok is False:
-            health_text += "    ● Offline (first model download needs internet)"
+            health_text += "    ● A download host is unreachable"
         ctk.CTkLabel(
             win, text=health_text,
             font=(self.F, 11), text_color=health_color,
@@ -879,9 +902,11 @@ class App(ctk.CTk):
             link.pack(padx=28, anchor="w")
             link.bind("<Button-1>", lambda e: webbrowser.open(model.license_url))
 
-        if self._online_ok is False:
+        # Checked against this model's own host, not Demucs' — a RoFormer
+        # checkpoint comes from Hugging Face.
+        if self._host_ok.get(source) is False:
             ctk.CTkLabel(
-                win, text="● You appear to be offline — the download will fail.",
+                win, text=f"● {source} is unreachable — the download will fail.",
                 font=(self.F, 11), text_color=self._STATUS_ERR,
                 wraplength=410, justify="left",
             ).pack(padx=28, pady=(8, 0), anchor="w")
@@ -934,7 +959,10 @@ class App(ctk.CTk):
         self.seg_format.configure(state="disabled")
         self.progress_bar.set(0)
 
-        output_dir = output_folder_for(self.file_path)
+        # A new folder per run, so earlier stems are never overwritten or mixed
+        # in; kept on self because the Done dialog must open this exact folder.
+        output_dir = fresh_output_folder(self.file_path)
+        self._output_dir = output_dir
 
         # Get Options
         shifts = 2 if self.chk_quality.get() == 1 else 1
@@ -965,7 +993,7 @@ class App(ctk.CTk):
         self.progress_bar.set(min(max(progress_val, 0.0), 1.0))
 
         if status_text == "Done!":
-            output_dir = output_folder_for(self.file_path)
+            output_dir = self._output_dir
             self.reset_ui()
             if messagebox.askyesno("Done!", f"Separation complete!\n\nOpen output folder?"):
                 os.startfile(output_dir)
@@ -994,7 +1022,7 @@ class App(ctk.CTk):
 
     def _reset_file_zone(self):
         self.file_path = None
-        self._zone_text.configure(text="Drop an audio file", text_color=self._TXT_HI)
+        self._zone_text.configure(text="Choose an audio file", text_color=self._TXT_HI)
         self._zone_sub.configure(text="MP3   ·   WAV   ·   FLAC", text_color=self._TXT_DIM)
         self._file_zone.configure(border_color=self._CARD_BD)
         self.btn_select.configure(text="Browse Files")
@@ -1077,6 +1105,13 @@ class App(ctk.CTk):
         else:
             self.chk_karaoke.deselect()
             self.chk_karaoke.configure(state="disabled", text_color=self._TXT_DIM)
+
+        # Same rule for High Quality, which only means something to demucs.
+        if model.supports_high_quality:
+            self.chk_quality.configure(state="normal", text_color=self._TXT_MID)
+        else:
+            self.chk_quality.deselect()
+            self.chk_quality.configure(state="disabled", text_color=self._TXT_DIM)
 
         credit, url = self._ENGINE_CREDIT.get(model.engine, self._ENGINE_CREDIT["demucs"])
         self.lbl_attribution.configure(text=credit, text_color=accent)

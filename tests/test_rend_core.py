@@ -15,7 +15,9 @@ from rend_core import (
     RoformerEngine,
     SeparationThread,
     available_models,
+    download_hosts,
     engine_for_model,
+    fresh_output_folder,
     get_engine,
     karaoke_mixdown,
     output_folder_for,
@@ -37,6 +39,51 @@ def test_output_folder_strips_only_last_extension():
 
 def test_output_folder_for_bare_filename():
     assert output_folder_for("song.flac") == "song_stems"
+
+
+# ── Fresh output folder per run ───────────────────────────────────────────────
+
+def test_fresh_output_folder_uses_base_name_when_free(tmp_path):
+    song = tmp_path / "song.mp3"
+    assert fresh_output_folder(str(song)) == str(tmp_path / "song_stems")
+
+def test_fresh_output_folder_never_reuses_a_folder_with_stems(tmp_path):
+    # A second run must not overwrite (or mix into) the first run's stems.
+    song = tmp_path / "song.mp3"
+    (tmp_path / "song_stems").mkdir()
+    (tmp_path / "song_stems" / "vocals.wav").write_bytes(b"x")
+    assert fresh_output_folder(str(song)) == str(tmp_path / "song_stems") + " (2)"
+    (tmp_path / "song_stems (2)").mkdir()
+    (tmp_path / "song_stems (2)" / "vocals.wav").write_bytes(b"x")
+    assert fresh_output_folder(str(song)) == str(tmp_path / "song_stems") + " (3)"
+
+def test_fresh_output_folder_reuses_an_empty_folder(tmp_path):
+    # e.g. left behind by a run cancelled before it saved anything
+    song = tmp_path / "song.mp3"
+    (tmp_path / "song_stems").mkdir()
+    assert fresh_output_folder(str(song)) == str(tmp_path / "song_stems")
+
+def test_fresh_output_folder_skips_a_same_named_file(tmp_path):
+    song = tmp_path / "song.mp3"
+    (tmp_path / "song_stems").write_bytes(b"not a folder")
+    assert fresh_output_folder(str(song)) == str(tmp_path / "song_stems") + " (2)"
+
+
+# ── Download hosts ────────────────────────────────────────────────────────────
+
+def test_download_hosts_cover_every_runnable_model_source():
+    # The Online light once probed only Meta's CDN, so it said nothing about
+    # whether a RoFormer checkpoint (Hugging Face) could download.
+    hosts = download_hosts()
+    assert hosts[0] == rend_core.DEMUCS_WEIGHTS_HOST
+    for model in available_models():
+        for f in model.files:
+            assert f.url.split("/")[2] in hosts
+    assert len(hosts) == len(set(hosts))
+
+def test_check_hosts_reports_each_host(monkeypatch):
+    monkeypatch.setattr(rend_core, "check_online", lambda host, timeout=3: host == "a.example")
+    assert rend_core.check_hosts(("a.example", "b.example")) == {"a.example": True, "b.example": False}
 
 
 # ── Progress fraction mapping ─────────────────────────────────────────────────

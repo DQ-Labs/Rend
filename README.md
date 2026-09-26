@@ -9,15 +9,15 @@ A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](htt
 ## Features
 
 - **Animated Splash Screen**: Rose Orbit math-curve loader animates during startup while heavy libraries load in the background
-- **6 Model Options**: htdemucs, htdemucs_ft, htdemucs_6s, mdx, mdx_extra, mdx_q — choose your speed/quality tradeoff
+- **8 Model Options**: six Demucs models (htdemucs, htdemucs_ft, htdemucs_6s, mdx, mdx_extra, mdx_q) plus two Mel-Band RoFormer models — choose your speed/quality tradeoff
 - **Karaoke Mode**: Automatic 2-stem output (vocals + accompaniment) for backing tracks
-- **High Quality Mode**: Enable `shifts=2` for slower but higher-precision separation
+- **High Quality Mode**: Enable `shifts=2` for slower but higher-precision separation (Demucs models; the RoFormer engine has no equivalent, so the option is disabled there)
 - **Cancel During Processing**: Stop an active separation at any segment boundary
 - **Open Output Folder**: Completion dialog offers one-click folder access
 - **GPU Acceleration**: Auto-detects an NVIDIA (CUDA) GPU and uses it when present, falling back to CPU otherwise — shown by the ● GPU / ● CPU status light. (The prebuilt installer ships CPU-only PyTorch; GPU requires a source install with a CUDA build of PyTorch.)
 - **Offline Execution**: Full separation without internet (after initial model download), on CPU or GPU
 - **WAV or FLAC Export**: Direct output via soundfile — 32-bit float WAV (lossless headroom) or 24-bit FLAC (~half the size)
-- **Dark Mode UI**: Clean, modern palette with real-time status lights (FFmpeg, Online)
+- **Dark Mode UI**: Clean, modern palette with real-time status lights (FFmpeg, device, and Online — which checks every host a model downloads from; click it for the per-host detail)
 - **Responsive Threading**: UI stays responsive during heavy processing
 - **About Pane**: Version, dependency credits, environment health, and a one-click bug-report link
 
@@ -83,13 +83,13 @@ so Rend shows the licence state and asks before fetching anything.
 ## Usage
 
 1. **Select Audio**: Click the file zone and choose an MP3, WAV, or FLAC file
-2. **Pick a Model**: Choose from the 6 available options (see Models above)
+2. **Pick a Model**: Choose from the 8 available options (see Model Selection above)
 3. **Set Options**: Toggle High Quality mode or Karaoke Mode as desired
 4. **Separate**: Click **SEPARATE STEMS** and watch the progress
 5. **Cancel**: Click **Cancel** anytime to stop mid-processing
 6. **Open**: When done, click "Open output folder?" to browse the results
 
-Output stems are saved as WAV files in a folder next to your input file (e.g., `mysong.mp3` → `mysong_stems/`).
+Output stems are saved as WAV or FLAC files in a folder next to your input file (e.g., `mysong.mp3` → `mysong_stems/`). Each run gets its own folder — separating the same song again writes to `mysong_stems (2)/`, and so on — so earlier results are never overwritten or mixed with a later run's stems.
 
 ## Building from Source
 
@@ -166,7 +166,7 @@ If the first separation seems to hang during model download, check your internet
 
 ### Separation errors
 
-If a separation fails, the full error details are written to `%LOCALAPPDATA%\Rend\error.log` — please attach it when reporting an issue. The **About** pane (bottom-right of the app) has a "Report a Bug" button that opens a pre-filled issue template.
+If a separation fails, the full error details are written to `%LOCALAPPDATA%\Rend\error.log` — please attach it when reporting an issue. The **About** link (top-right of the app) has a "Report a Bug" button that opens a pre-filled issue template.
 
 ## License
 

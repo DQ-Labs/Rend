@@ -15,6 +15,7 @@ import tempfile
 import threading
 import time
 import traceback
+from urllib.parse import urlparse
 
 import torch
 import soundfile as sf
@@ -40,6 +41,24 @@ def output_folder_for(input_file):
     """Return the stems output folder for *input_file*: <name>_stems next to it."""
     folder_name = os.path.splitext(os.path.basename(input_file))[0] + "_stems"
     return os.path.join(os.path.dirname(input_file), folder_name)
+
+
+def fresh_output_folder(input_file):
+    """The folder a new run should write into: <name>_stems, or <name>_stems (2),
+    (3)... if earlier runs already filled it.
+
+    Each run gets its own folder because save_stems overwrites same-named files
+    and never clears the folder: re-running a song replaced stems that may have
+    taken an hour of CPU, and a different model or Karaoke setting left the old
+    run's extra stems mixed in with the new ones, indistinguishable. An existing
+    but empty folder (e.g. from a run cancelled before saving) is reused.
+    """
+    base = output_folder_for(input_file)
+    candidate, n = base, 1
+    while os.path.exists(candidate) and not (os.path.isdir(candidate) and not os.listdir(candidate)):
+        n += 1
+        candidate = f"{base} ({n})"
+    return candidate
 
 
 def progress_fraction(segment_offset, audio_length):
@@ -139,17 +158,37 @@ def check_ffmpeg():
         return False
 
 
-def check_online(host="dl.fbaipublicfiles.com", port=443, timeout=3):
-    """Return True if the model-weights download host is reachable.
+DEMUCS_WEIGHTS_HOST = "dl.fbaipublicfiles.com"   # where demucs/torch.hub fetches weights
 
-    Probes the host the weights actually download from, so the status light
-    reflects whether a first-run download can succeed.
-    """
+
+def check_online(host=DEMUCS_WEIGHTS_HOST, port=443, timeout=3):
+    """Return True if *host* is reachable on *port*."""
     try:
-        socket.create_connection((host, port), timeout=timeout)
-        return True
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
     except OSError:
         return False
+
+
+def download_hosts():
+    """Every host a first-run model download can come from, in a stable order.
+
+    Demucs weights come from Meta's CDN; the RoFormer checkpoints come from
+    each model's own repo (Hugging Face). Probing only the first left the Online
+    light — and the download dialog's offline warning — wrong for RoFormer.
+    """
+    hosts = [DEMUCS_WEIGHTS_HOST]
+    for model in available_models():
+        for f in model.files:
+            host = urlparse(f.url).hostname
+            if host and host not in hosts:
+                hosts.append(host)
+    return tuple(hosts)
+
+
+def check_hosts(hosts=None, timeout=3):
+    """Return {host: reachable} for *hosts* (default: download_hosts())."""
+    return {h: check_online(h, timeout=timeout) for h in (hosts or download_hosts())}
 
 
 def select_device():

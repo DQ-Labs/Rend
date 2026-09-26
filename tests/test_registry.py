@@ -228,3 +228,14 @@ def test_model_is_frozen():
         assert e.__class__.__name__ == "FrozenInstanceError"
     else:
         raise AssertionError("Model should be immutable (frozen dataclass)")
+
+
+# ── High Quality applicability ────────────────────────────────────────────────
+
+def test_high_quality_is_offered_only_for_demucs_models():
+    # High Quality is demucs' shifts=2; the RoFormer engine ignores it, so the
+    # checkbox must not be offered there (it promised "2x slower" for nothing).
+    for model in registry.all_models():
+        assert model.supports_high_quality == (model.engine == "demucs"), model.id
+    assert registry.get_model("htdemucs").supports_high_quality
+    assert not registry.get_model("melband_instrumental").supports_high_quality
