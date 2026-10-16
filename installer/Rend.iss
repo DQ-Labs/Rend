@@ -40,8 +40,29 @@ ArchitecturesInstallIn64BitMode=x64compatible
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+; The app is a PyInstaller one-dir build: {app}\Rend.exe is the launcher and
+; {app}\_internal holds everything it loads (Python runtime, torch, ffmpeg,
+; assets, demucs). Up to 1.4.1 the app was a single one-file Rend.exe in the
+; same place, so an upgrade overwrites that file in place under the same name
+; and existing Start-menu/desktop shortcuts keep working.
+
+[InstallDelete]
+; Clear the previous build's runtime before copying the new one. Installing
+; over an older one-dir build would otherwise leave DLLs and modules that the
+; new build no longer ships sitting next to the ones it does, where Python or
+; Windows' DLL search can pick them up.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
-Source: "..\dist\{#AppName}.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\{#AppName}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[UninstallDelete]
+; Inno removes every file it installed, but not anything created next to them
+; at runtime. Rend writes its logs and model weights to %LOCALAPPDATA%\Rend, never
+; here; this is the belt-and-braces guarantee that uninstall leaves no runtime
+; folder behind regardless.
+Type: filesandordirs; Name: "{app}\_internal"
+Type: dirifempty; Name: "{app}"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppName}.exe"
