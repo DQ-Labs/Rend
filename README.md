@@ -17,6 +17,7 @@ A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](htt
 - **GPU Acceleration**: Auto-detects an NVIDIA (CUDA) GPU and uses it when present, falling back to CPU otherwise — shown by the ● GPU / ● CPU status light. (The prebuilt installer ships CPU-only PyTorch; GPU requires a source install with a CUDA build of PyTorch.)
 - **Offline Execution**: Full separation without internet (after initial model download), on CPU or GPU
 - **WAV or FLAC Export**: Direct output via soundfile — 32-bit float WAV (lossless headroom) or 24-bit FLAC (~half the size)
+- **Serato DJ Stems Export**: Choose **SERATO** as the output to write `<song>.1.2.serato-stems` next to the track, so Serato DJ Pro plays Rend's separation as its own native stems. For 44.1 kHz MP3s with a 4-stem Demucs model (htdemucs, htdemucs_ft, mdx, mdx_extra, mdx_q); not available with the 6-stem or RoFormer models or in Karaoke Mode
 - **Dark Mode UI**: Clean, modern palette with real-time status lights (FFmpeg, device, and Online — which checks every host a model downloads from; click it for the per-host detail)
 - **Responsive Threading**: UI stays responsive during heavy processing
 - **About Pane**: Version, dependency credits, environment health, and a one-click bug-report link
@@ -89,7 +90,9 @@ so Rend shows the licence state and asks before fetching anything.
 5. **Cancel**: Click **Cancel** anytime to stop mid-processing
 6. **Open**: When done, click "Open output folder?" to browse the results
 
-Output stems are saved as WAV or FLAC files in a folder next to your input file (e.g., `mysong.mp3` → `mysong_stems/`). Each run gets its own folder — separating the same song again writes to `mysong_stems (2)/`, and so on — so earlier results are never overwritten or mixed with a later run's stems.
+With **SERATO** selected, Rend instead writes a single `mysong.1.2.serato-stems` file beside `mysong.mp3` — the one place Serato DJ looks — and asks before replacing one that's already there.
+
+Otherwise, output stems are saved as WAV or FLAC files in a folder next to your input file (e.g., `mysong.mp3` → `mysong_stems/`). Each run gets its own folder — separating the same song again writes to `mysong_stems (2)/`, and so on — so earlier results are never overwritten or mixed with a later run's stems.
 
 ## Building from Source
 

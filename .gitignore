@@ -10,6 +10,7 @@ demucs_source/
 *.mp3
 *.wav
 *.flac
+*.serato-stems
 
 # Claude Code local state (worktrees, per-machine settings) — never commit
 .claude/

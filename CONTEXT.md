@@ -15,6 +15,7 @@ change is most likely to break.
 | `config.py` | Identity: name, version, URLs, credits. Dependency-free (CI imports it bare). |
 | `registry.py` | Model catalog — engine, stems, karaoke/High Quality applicability, download URL/size/sha256/license. Stdlib only. |
 | `downloader.py` | SHA256-verified weight downloads (`.part` → verify → atomic replace), cancellable per block. Stdlib only. |
+| `serato_stems.py` | Serato DJ `.serato-stems` reader/writer and export: Serato's length rule, its undelayed decode, MP3 encode + verify. numpy/soundfile only, no torch or GUI. |
 | `rend_core.py` | Engines (`DemucsEngine`, `RoformerEngine`), `SeparationThread`, stem saving, output folders, diagnostics. No GUI imports. |
 | `roformer_source/` | Vendored Mel-Band RoFormer architecture + chunked inference (MIT lineage in `mel_band_roformer.py`). |
 | `app.py` | The CustomTkinter shell, splash screen, license gate. Not importable in CI. |
@@ -54,5 +55,11 @@ change is most likely to break.
   `select_device()` still uses CUDA on a source install with a CUDA torch.
 - **RoFormer needs ~16 GB RAM.** Measured 7.4 GB peak on an 8 GB machine, where
   it pages indefinitely. Demucs is fine in ~2 GB. Documented in the README.
+- **The Serato export decodes the MP3 differently from everything else.** Serato
+  counts `(audio frames + 1 if Info frame) × 1152` samples and rejects (trashes)
+  a stems file of any other length, so the export separates ffmpeg's
+  `-flags2 +skip_manual` decode with one silent frame prepended — not
+  `separate_audio_file`. Each encoded stem is decoded back *from a file* and
+  must be exactly that length before anything is written.
 - **Each run writes a fresh `<song>_stems (n)` folder**, by design — re-running
   used to overwrite earlier stems and mix different runs' outputs.

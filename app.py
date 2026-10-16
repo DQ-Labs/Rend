@@ -201,6 +201,7 @@ from PIL import Image
 from tkinter import filedialog, messagebox, font as tkfont
 from rend_core import (
     LOG_FILE,
+    SERATO_FORMAT,
     SeparationThread,
     available_models,
     check_ffmpeg,
@@ -208,7 +209,9 @@ from rend_core import (
     fresh_output_folder,
     log_error,
     select_device,
+    serato_problem,
 )
+from serato_stems import stems_path
 
 # ── Startup fixes ─────────────────────────────────────────────────────────────
 
@@ -530,12 +533,13 @@ class App(ctk.CTk):
         band.grid_columnconfigure(5, weight=1)
 
         ctk.CTkLabel(band, image=self._ico_mic, text="").grid(
-            row=0, column=0, padx=(20, 8), pady=18)
+            row=0, column=0, padx=(20, 8), pady=14)
         self.chk_karaoke = ctk.CTkCheckBox(
             band, text="Karaoke Mode", font=(self.F, 13), text_color=self._TXT_MID,
             fg_color=self._ACCENT, hover_color=self._ACCENT_HO,
             border_color=self._DIM, checkmark_color="white",
-            checkbox_width=20, checkbox_height=20)
+            checkbox_width=20, checkbox_height=20,
+            command=self._update_serato_option)
         self.chk_karaoke.grid(row=0, column=1, padx=(0, 26))
 
         ctk.CTkLabel(band, image=self._ico_sparkle, text="").grid(
@@ -556,11 +560,11 @@ class App(ctk.CTk):
             band, text="OUTPUT", font=(self.F, 10, "bold"),
             text_color=self._TXT_DIM).grid(row=0, column=7, padx=(0, 10))
         self.seg_format = ctk.CTkSegmentedButton(
-            band, values=["WAV", "FLAC"], width=150, height=32,
+            band, values=["WAV", "FLAC", "SERATO"], width=210, height=32,
             font=(self.F, 12), fg_color=self._CARD_WELL,
             selected_color=self._ACCENT, selected_hover_color=self._ACCENT_HO,
             unselected_color=self._CARD_WELL, unselected_hover_color=self._DIM,
-            text_color=self._TXT_HI, corner_radius=8,
+            text_color=self._TXT_HI, text_color_disabled=self._TXT_DIM, corner_radius=8,
             command=self._update_format_hint)
         self.seg_format.grid(row=0, column=8)
         self.seg_format.set("WAV")
@@ -568,6 +572,14 @@ class App(ctk.CTk):
             band, text="Uncompressed", font=(self.F, 10),
             text_color=self._TXT_DIM, width=104, anchor="w")
         self.lbl_format_hint.grid(row=0, column=9, padx=(12, 20))
+
+        # What the Serato option does, or why it is greyed out. Always shown,
+        # so a disabled SERATO segment never needs guessing about.
+        self.lbl_serato = ctk.CTkLabel(
+            band, text="", font=(self.F, 10), text_color=self._TXT_DIM, anchor="e", height=16)
+        self.lbl_serato.grid(row=1, column=0, columnspan=10, sticky="e",
+                             padx=(20, 20), pady=(0, 12))
+        self._serato_problem = None
 
     # ── Action: run / cancel, then progress ───────────────────────────────────
 
@@ -711,8 +723,44 @@ class App(ctk.CTk):
         hints = {
             "WAV":  "Uncompressed · largest files",
             "FLAC": "Lossless · ~half the size",
+            "SERATO": "Serato DJ stems file",
         }
         self.lbl_format_hint.configure(text=hints.get(choice, ""))
+
+    def _set_format_enabled(self, value, enabled):
+        """Enable/disable one segment of the OUTPUT control.
+
+        CTkSegmentedButton (5.2.2, pinned) has no public per-segment state, so
+        this reaches its value → button map. If a future CustomTkinter drops
+        it, the segment simply stays clickable and start_separation's own
+        check still refuses an unsupported Serato run.
+        """
+        button = getattr(self.seg_format, "_buttons_dict", {}).get(value)
+        if button is not None:
+            button.configure(state="normal" if enabled else "disabled")
+
+    def _update_serato_option(self):
+        """Grey out SERATO, with the reason, when the file/model/Karaoke choice
+        can't produce a Serato stems file; fall back to WAV if it was selected.
+
+        Called whenever one of those changes. Serato needs an MPEG-1 Layer III
+        44.1 kHz MP3 and a 4-stem Demucs model, without Karaoke Mode.
+        """
+        model = self._model_by_label.get(self.opt_model.get())
+        problem = serato_problem(self.file_path, model.id if model else "",
+                                 self.chk_karaoke.get() == 1)
+        self._serato_problem = problem
+        self._set_format_enabled("SERATO", problem is None)
+        if problem and self.seg_format.get() == "SERATO":
+            self.seg_format.set("WAV")
+            self._update_format_hint("WAV")
+        if problem:
+            text = f"Serato DJ unavailable — {problem}"
+        elif self.file_path:
+            text = f"Serato DJ: writes {os.path.basename(stems_path(self.file_path))} beside the track"
+        else:
+            text = "Serato DJ: for 44.1 kHz MP3s with a 4-stem Demucs model"
+        self.lbl_serato.configure(text=text)
 
     def open_attribution(self, event):
         webbrowser.open(self._attribution_url)
@@ -834,6 +882,7 @@ class App(ctk.CTk):
             self._file_zone.configure(border_color=self._CARD_BD_HI)
             self.btn_select.configure(text="Change File")
             self.btn_run.configure(state="normal")
+            self._update_serato_option()
 
     def _confirm_model_download(self, model):
         """License gate shown before the first download of a model's weights.
@@ -943,6 +992,25 @@ class App(ctk.CTk):
         if model is None:
             return
 
+        serato = self.seg_format.get() == "SERATO"
+        if serato:
+            problem = serato_problem(self.file_path, model.id, self.chk_karaoke.get() == 1)
+            if problem:
+                messagebox.showwarning("Serato DJ", f"Serato DJ export unavailable: {problem}.")
+                return
+            # Serato reads exactly one file per track, at this exact name, so a
+            # second run can't go to a "(2)" copy the way stem folders do. Ask
+            # before replacing one — it may be Serato's own analysis.
+            target = stems_path(self.file_path)
+            if os.path.exists(target) and not messagebox.askyesno(
+                "Replace Serato stems?",
+                f"{os.path.basename(target)} already exists next to this track.\n\n"
+                "Replace it with Rend's stems? (To keep Serato's own, move it "
+                "somewhere else first.)",
+                icon="warning",
+            ):
+                return
+
         # First use of a downloadable model: take consent before any network
         # traffic. The engine downloads the weights as its first step, so the
         # gate has to happen here, before the worker thread starts.
@@ -961,13 +1029,16 @@ class App(ctk.CTk):
 
         # A new folder per run, so earlier stems are never overwritten or mixed
         # in; kept on self because the Done dialog must open this exact folder.
-        output_dir = fresh_output_folder(self.file_path)
+        # A Serato export writes beside the track instead (see above).
+        output_dir = (os.path.dirname(os.path.abspath(self.file_path)) if serato
+                      else fresh_output_folder(self.file_path))
         self._output_dir = output_dir
 
         # Get Options
         shifts = 2 if self.chk_quality.get() == 1 else 1
         two_stems = self.chk_karaoke.get() == 1
-        output_format = self.seg_format.get().lower()  # "WAV"/"FLAC" -> "wav"/"flac"
+        # "WAV"/"FLAC" -> "wav"/"flac"; "SERATO" -> SERATO_FORMAT
+        output_format = SERATO_FORMAT if serato else self.seg_format.get().lower()
 
         self._stop_event = threading.Event()
         self.worker = SeparationThread(
@@ -994,8 +1065,12 @@ class App(ctk.CTk):
 
         if status_text == "Done!":
             output_dir = self._output_dir
+            serato_file = getattr(self.worker, "serato_file", None)
             self.reset_ui()
-            if messagebox.askyesno("Done!", f"Separation complete!\n\nOpen output folder?"):
+            message = ("Separation complete!\n\nOpen output folder?" if not serato_file else
+                       f"Serato DJ stems saved next to the track:\n{os.path.basename(serato_file)}"
+                       "\n\nLoad the track in Serato DJ Pro to use them.\n\nOpen the folder?")
+            if messagebox.askyesno("Done!", message):
                 os.startfile(output_dir)
         elif status_text == "Cancelled.":
             self.lbl_status.configure(text="Cancelled")
@@ -1027,6 +1102,7 @@ class App(ctk.CTk):
         self._file_zone.configure(border_color=self._CARD_BD)
         self.btn_select.configure(text="Browse Files")
         self.btn_run.configure(state="disabled")
+        self._update_serato_option()
 
     def _deferred_reset(self):
         try:
@@ -1116,6 +1192,10 @@ class App(ctk.CTk):
         credit, url = self._ENGINE_CREDIT.get(model.engine, self._ENGINE_CREDIT["demucs"])
         self.lbl_attribution.configure(text=credit, text_color=accent)
         self._attribution_url = url
+
+        # Serato needs a 4-stem Demucs model (and Karaoke may just have been
+        # cleared above, which doesn't fire the checkbox's command).
+        self._update_serato_option()
 
 if __name__ == "__main__":
     app = App()
