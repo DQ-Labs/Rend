@@ -3,7 +3,8 @@
 The format facts and the ground-truth table come from seven Serato-made files
 analysed on Windows; the audio itself is copyrighted and is never fetched or
 committed. Everything here runs on synthetic audio. The ffmpeg tests need an
-ffmpeg with libmp3lame (and ffprobe) on PATH and are skipped without one.
+ffmpeg with libmp3lame (and ffprobe), found the way rend_core.ffmpeg_exe()
+finds it: PATH first, then the copy in the project root. Skipped without one.
 """
 
 import os
@@ -183,10 +184,27 @@ def test_source_problem_for_48k_and_mpeg2(tmp_path):
 
 # ── ffmpeg-backed tests ───────────────────────────────────────────────────────
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _tool(name):
+    """Resolve ffmpeg/ffprobe like rend_core.ffmpeg_exe(): PATH, then the
+    project-root copy a source install keeps beside app.py. Without the
+    fallback these tests skip silently on a Windows dev checkout."""
+    found = shutil.which(name)
+    if found:
+        return found
+    local = os.path.join(_ROOT, name + (".exe" if os.name == "nt" else ""))
+    return local if os.path.exists(local) else None
+
+
+FFMPEG, FFPROBE = _tool("ffmpeg"), _tool("ffprobe")
+
+
 def _has_lame():
-    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+    if not (FFMPEG and FFPROBE):
         return False
-    out = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+    out = subprocess.run([FFMPEG, "-hide_banner", "-encoders"],
                          capture_output=True, text=True).stdout
     return "libmp3lame" in out
 
@@ -196,7 +214,7 @@ needs_lame = pytest.mark.skipif(not _has_lame(), reason="needs ffmpeg + ffprobe 
 
 def _make_mp3(path, seconds, xing, rate=44100):
     subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+        [FFMPEG, "-v", "error", "-y", "-f", "lavfi",
          # noise, not a tone: a periodic signal would make the alignment
          # check below ambiguous
          "-i", f"anoisesrc=sample_rate={rate}:duration={seconds}:amplitude=0.3:seed=7",
@@ -208,7 +226,7 @@ def _make_mp3(path, seconds, xing, rate=44100):
 
 def _packets(path):
     out = subprocess.run(
-        ["ffprobe", "-v", "error", "-count_packets", "-select_streams", "a:0",
+        [FFPROBE, "-v", "error", "-count_packets", "-select_streams", "a:0",
          "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", str(path)],
         capture_output=True, text=True, check=True).stdout
     return int(out.strip())
@@ -332,7 +350,7 @@ def test_end_to_end_export(tmp_path, stub_demucs, xing):
         p.write_bytes(data)
         assert ss.decoded_length(str(p)) == n
         wav = tmp_path / f"stem{index}.wav"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(p), str(wav)], check=True)
+        subprocess.run([FFMPEG, "-v", "error", "-y", "-i", str(p), str(wav)], check=True)
         stem = sf.read(str(wav), dtype="float32")[0].T
         levels[index] = float(np.sqrt(np.mean(stem ** 2)))
         if index == ss.VOCALS:
