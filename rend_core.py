@@ -23,6 +23,7 @@ import config
 import downloader
 import paths
 import registry
+import serato_stems
 
 LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), config.APP_NAME, "error.log")
 
@@ -103,6 +104,19 @@ OUTPUT_FORMATS = {
     "wav":  (".wav",  "WAV",  "FLOAT"),
     "flac": (".flac", "FLAC", "PCM_24"),
 }
+
+
+# Not a save_stems format: "serato" writes one <song>.1.2.serato-stems file
+# beside the original (see serato_stems.py) instead of a stems folder.
+SERATO_FORMAT = "serato"
+
+
+def serato_problem(input_file, model_name, two_stems):
+    """Why the Serato DJ export can't run for this input/model/Karaoke choice,
+    or None if it can. Model and Karaoke are checked first: they don't need
+    the file."""
+    return (serato_stems.model_problem(model_name, two_stems)
+            or (serato_stems.source_problem(input_file) if input_file else None))
 
 
 def save_stems(separated, output_folder, samplerate, fmt="wav"):
@@ -233,6 +247,13 @@ class DemucsEngine(Engine):
     def separate(self, req):
         import demucs.api  # deferred — see module docstring
 
+        serato = req.output_format == SERATO_FORMAT
+        if serato:
+            # Checked before the Separator is built, which may download weights.
+            problem = serato_problem(req.input_file, req.model_name, req.two_stems)
+            if problem:
+                raise ValueError(f"Serato DJ export unavailable: {problem}.")
+
         # Reported BEFORE the Separator is built, because that constructor is
         # what fetches the weights on first use — mdx is a bag of four models,
         # about 650 MB — and this message used to be emitted *after* it. So the
@@ -259,6 +280,9 @@ class DemucsEngine(Engine):
             raise KeyboardInterrupt
 
         req.callback(f"Loading {req.model_name} on {req.device.upper()}...", 0.1)
+        if serato:
+            self._separate_for_serato(req, separator)
+            return
         origin, separated = separator.separate_audio_file(req.input_file)
 
         req.callback(f"Saving {req.output_format.upper()} files...", 0.9)
@@ -266,6 +290,33 @@ class DemucsEngine(Engine):
         if req.two_stems:
             separated = karaoke_mixdown(separated, req.model_name)
         save_stems(separated, req.output_folder, separator.samplerate, req.output_format)
+
+    @staticmethod
+    def _separate_for_serato(req, separator):
+        """Separate Serato's own decode of the original and write the stems file.
+
+        Not separate_audio_file(): Serato's timing is the undelayed decode with
+        a silent frame prepended when the MP3 has an Info header (see
+        serato_stems.decode_for_serato), so every stem comes out exactly the N
+        samples Serato expects and lines up with what it plays.
+        """
+        if separator.samplerate != serato_stems.SAMPLE_RATE:
+            raise ValueError(f"{req.model_name} runs at {separator.samplerate} Hz; "
+                             f"Serato stems need {serato_stems.SAMPLE_RATE} Hz.")
+        audio, samples = serato_stems.decode_for_serato(req.input_file)
+        if req.stop_event.is_set():
+            raise KeyboardInterrupt
+        _origin, separated = separator.separate_tensor(
+            torch.from_numpy(audio), serato_stems.SAMPLE_RATE)
+
+        req.callback("Encoding Serato DJ stems...", 0.9)
+        stems = {name: t.detach().cpu().numpy() for name, t in separated.items()}
+        req.serato_file = serato_stems.export(
+            req.input_file, stems, samples,
+            progress=lambda done, total: req.callback(
+                f"Encoding Serato DJ stems... {done}/{total}", 0.9 + 0.08 * done / total),
+            should_stop=req.stop_event.is_set,
+        )
 
 
 def decode_audio(path, target_sr, channels=2):
@@ -304,6 +355,8 @@ class RoformerEngine(Engine):
     name = "roformer"
 
     def separate(self, req):
+        if req.output_format == SERATO_FORMAT:
+            raise ValueError("Serato DJ export needs a 4-stem Demucs model.")
         # Deferred so the vendored model code is imported only when a RoFormer
         # model actually runs.
         from roformer_source import inference as roformer_inference
@@ -423,9 +476,11 @@ class SeparationThread(threading.Thread):
         self.two_stems = two_stems
         self.callback = callback
         self.stop_event = stop_event
-        # device=None → auto-detect at run time; output_format is a save_stems key
+        # device=None → auto-detect at run time; output_format is a save_stems
+        # key, or SERATO_FORMAT for a .serato-stems file beside the input
         self.device = device
         self.output_format = output_format
+        self.serato_file = None   # set to the written path by a Serato export
 
     def run(self):
         try:
