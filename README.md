@@ -1,6 +1,6 @@
 # Rend
 
-A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](https://github.com/adefossez/demucs), built with CustomTkinter and packaged as a single-file EXE.
+A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](https://github.com/adefossez/demucs), built with CustomTkinter and shipped as a Windows installer.
 
 <p align="center">
   <img src=".github/images/main-window.png" alt="Rend main window" width="480">
@@ -25,7 +25,7 @@ A minimal, dark-mode Windows GUI for AI music stem separation using [Demucs](htt
 
 **Windows users: Get the latest installer (`Rend-Setup-<version>.exe`, no Python required) from [Releases](https://github.com/DQ-Labs/Rend/releases).**
 
-The installer adds a Start-menu entry, installs to `Program Files\Rend`, and registers an uninstaller in Windows **Apps & Features**.
+The installer adds a Start-menu entry, installs to `Program Files\Rend`, and registers an uninstaller in Windows **Apps & Features**. Installing over an older version upgrades it in place; existing shortcuts keep working.
 
 ## Model Selection
 
@@ -93,7 +93,7 @@ Output stems are saved as WAV or FLAC files in a folder next to your input file 
 
 ## Building from Source
 
-To create a standalone `Rend.exe`:
+To create a standalone build:
 
 1. Ensure prerequisites are met and virtual environment is activated
 2. Run PyInstaller:
@@ -101,11 +101,11 @@ To create a standalone `Rend.exe`:
    pyinstaller Rend.spec --clean --noconfirm
    ```
 
-The EXE will be in `dist/Rend.exe`. The spec file bundles FFmpeg, Demucs source, and all hidden imports automatically.
+The build is a PyInstaller **one-dir** folder: `dist/Rend/Rend.exe` plus `dist/Rend/_internal/`, which holds the Python runtime, PyTorch, FFmpeg, the Demucs source and the UI assets. `Rend.exe` only runs from inside that folder, so copy or ship the whole thing (the installer does). The spec file bundles FFmpeg, Demucs source, and all hidden imports automatically.
 
 ### Building the Installer
 
-To wrap `dist/Rend.exe` in the Windows installer that releases ship:
+To wrap the `dist/Rend/` folder in the Windows installer that releases ship:
 
 1. Install [Inno Setup](https://jrsoftware.org/isinfo.php) 6.3+ (`choco install innosetup`)
 2. Run the build script:
@@ -113,11 +113,11 @@ To wrap `dist/Rend.exe` in the Windows installer that releases ship:
    python installer/build_installer.py
    ```
 
-The installer will be in `dist/installer/Rend-Setup-<version>.exe`. The script reads the app name, version, publisher, and URLs from `config.py` and passes them to Inno Setup as `/D` defines, so `installer/Rend.iss` never duplicates them.
+The installer will be in `dist/installer/Rend-Setup-<version>.exe`. The script first checks that `dist/Rend/` is a complete build (exe, FFmpeg, icons, Demucs data), then reads the app name, version, publisher, and URLs from `config.py` and passes them to Inno Setup as `/D` defines, so `installer/Rend.iss` never duplicates them.
 
 ## Known Behavior
 
-- **First Launch**: The EXE may take ~30 seconds to start (PyInstaller one-file unpacking). Subsequent launches are faster.
+- **Startup**: the splash shows while PyTorch and Demucs load. Up to 1.4.1 Rend was a one-file EXE that unpacked ~230 MB to a temp folder on every launch (~30 s); since 1.5.0 it is installed unpacked, so that step is gone.
 - **First Separation**: On the very first run, the app downloads the selected model (~200 MB–1 GB depending on model). This requires internet and takes a few minutes. All subsequent runs are fully offline.
 - **Windows SmartScreen**: The unsigned installer may trigger a warning when run. Click "More info" → "Run anyway" to proceed.
 - **Memory**: the Demucs models are happy in ~2 GB and run fine on an 8 GB machine. The **RoFormer models are far hungrier** — measured at 7.4 GB of 7.8 GB on an 8 GB laptop, which leaves Windows paging and a separation that effectively never finishes. On 8 GB, stick to the Demucs models; RoFormer wants 16 GB.
@@ -138,8 +138,8 @@ Releases are built by CI, never by hand:
 - **Headless tests**: `tests/test_rend_core.py` exercises the core module without a display, demucs, or model downloads; CI runs it on every push and PR before any build starts.
 - **Local Demucs**: The project vendors demucs source at a pinned commit with Windows compatibility patches applied (`rend_core` imports it lazily, only when a separation actually runs)
 - **CustomTkinter UI**: Dark-mode, palette-driven design with responsive threading
-- **PyInstaller Bundling**: Handles FFmpeg, demucs source, and transitive dependencies via explicit `hiddenimports`
-- **Inno Setup Installer**: `installer/build_installer.py` compiles `installer/Rend.iss` with identity values from `config.py`, producing the versioned installer that releases ship
+- **PyInstaller Bundling**: One-dir build (`Rend.exe` + `_internal/`); handles FFmpeg, demucs source, and transitive dependencies via explicit `hiddenimports`. Bundled files are found through `paths.bundle_dir()`
+- **Inno Setup Installer**: `installer/build_installer.py` compiles `installer/Rend.iss` with identity values from `config.py`, producing the versioned installer that releases ship. It installs the whole one-dir folder, clears a previous `_internal` before installing, and removes it all on uninstall
 
 ### Running the tests
 

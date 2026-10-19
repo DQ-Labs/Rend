@@ -4,7 +4,8 @@ Reads the app's identity (name, version, publisher, URLs) from config.py —
 the single source of truth — and passes it to ISCC as /D preprocessor
 defines, so installer/Rend.iss never hardcodes any of it.
 
-Usage (after `pyinstaller Rend.spec` has produced dist/Rend.exe):
+Usage (after `pyinstaller Rend.spec` has produced the one-dir build in
+dist/Rend/ — Rend.exe plus its _internal folder):
 
     python installer/build_installer.py
 
@@ -39,10 +40,35 @@ def find_iscc():
     )
 
 
+# Files the one-dir build must contain, relative to dist/<AppName>/. Checked
+# before compiling so a broken PyInstaller build fails here, with a clear
+# message, instead of producing an installer that starts and then can't find
+# ffmpeg or its icons.
+def required_files(app_name=config.APP_NAME):
+    return [
+        f"{app_name}.exe",
+        os.path.join("_internal", "ffmpeg.exe"),
+        os.path.join("_internal", "ffprobe.exe"),
+        os.path.join("_internal", "rend.ico"),
+        os.path.join("_internal", "assets", "app_icon.png"),
+        os.path.join("_internal", "demucs", "remote", "files.txt"),
+    ]
+
+
+def missing_files(dist_dir, app_name=config.APP_NAME):
+    """Return the required_files() not present under *dist_dir* (empty if complete)."""
+    return [rel for rel in required_files(app_name)
+            if not os.path.isfile(os.path.join(dist_dir, rel))]
+
+
 def main():
-    exe = os.path.join(ROOT, "dist", f"{config.APP_NAME}.exe")
-    if not os.path.isfile(exe):
-        sys.exit(f"{exe} not found — run `pyinstaller Rend.spec` first.")
+    dist_dir = os.path.join(ROOT, "dist", config.APP_NAME)
+    if not os.path.isdir(dist_dir):
+        sys.exit(f"{dist_dir} not found — run `pyinstaller Rend.spec` first.")
+    missing = missing_files(dist_dir)
+    if missing:
+        sys.exit(f"The PyInstaller build in {dist_dir} is incomplete; missing: "
+                 + ", ".join(missing))
 
     cmd = [
         find_iscc(),

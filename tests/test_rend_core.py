@@ -1,6 +1,7 @@
 """Headless tests for rend_core — no GUI, no demucs, no model downloads."""
 
 import os
+import sys
 import threading
 
 import pytest
@@ -200,7 +201,7 @@ def test_ffmpeg_exe_falls_back_to_bundled_copy(monkeypatch, tmp_path):
     # Windows does not search the working directory, so a source install with
     # ffmpeg.exe beside the app must still resolve — this was silently broken.
     monkeypatch.setattr(rend_core.shutil, "which", lambda name: None)
-    monkeypatch.setattr(rend_core.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     local = tmp_path / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
     local.write_text("")
     assert rend_core.ffmpeg_exe() == str(local)
@@ -208,7 +209,7 @@ def test_ffmpeg_exe_falls_back_to_bundled_copy(monkeypatch, tmp_path):
 
 def test_ffmpeg_exe_last_resort_is_bare_name(monkeypatch, tmp_path):
     monkeypatch.setattr(rend_core.shutil, "which", lambda name: None)
-    monkeypatch.setattr(rend_core.sys, "_MEIPASS", str(tmp_path), raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
     assert rend_core.ffmpeg_exe() == "ffmpeg"  # nothing found; let it fail loudly
 
 

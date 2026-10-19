@@ -62,12 +62,19 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# One-dir build: dist/Rend/Rend.exe plus dist/Rend/_internal/ holding the
+# Python runtime, torch, ffmpeg/ffprobe, assets and the vendored demucs.
+#
+# The one-file build unpacked that whole ~230 MB payload to %TEMP% on every
+# launch, which was most of the ~30 s startup and ruled out a CUDA build. The
+# installer ships the whole folder, so users still see a single Start-menu
+# entry. Runtime code finds bundled files through paths.bundle_dir(), which is
+# sys._MEIPASS — the _internal folder in a PyInstaller 6 one-dir build.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,   # binaries and datas go into COLLECT, not the EXE
     name='Rend',
     debug=False,
     bootloader_ignore_signals=False,
@@ -75,8 +82,6 @@ exe = EXE(
     # UPX disabled: compressing the bundled torch/ffmpeg DLLs is a common
     # source of antivirus false positives and occasional broken DLLs
     upx=False,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -84,4 +89,17 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='rend.ico',
+    # PyInstaller 6's default, stated so paths.CONTENTS_DIR and the installer's
+    # [InstallDelete]/[UninstallDelete] entries can't silently drift from it.
+    contents_directory='_internal',
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='Rend',
 )

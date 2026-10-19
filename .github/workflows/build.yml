@@ -123,15 +123,18 @@ jobs:
           # demucs is vendored from source at a pinned commit
           pip install -e ./demucs_source
 
-      - name: Build EXE
+      - name: Build App (one-dir)
         run: |
+          # One-dir build: dist/Rend/Rend.exe + dist/Rend/_internal/. The
+          # installer step below ships the whole folder.
           pyinstaller Rend.spec
 
       - name: Build Installer
         shell: pwsh
         run: |
-          # Wrap the PyInstaller exe with Inno Setup: Start-menu entry,
-          # Apps & Features uninstaller, predictable install location.
+          # Wrap the PyInstaller one-dir build (dist/Rend/) with Inno Setup:
+          # Start-menu entry, Apps & Features uninstaller, predictable install
+          # location. build_installer.py refuses an incomplete dist/Rend/.
           # Version pinned so every build uses the same compiler.
           choco install innosetup --version 6.4.3 --yes --no-progress
           # Reads name/version/publisher/URLs from config.py and passes

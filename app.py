@@ -8,6 +8,7 @@ import traceback
 import tkinter as tk
 
 import config
+import paths      # stdlib-only bundle-path lookup: safe to import before the splash
 import registry   # stdlib-only model catalog: safe to import before the splash
 
 # ── Animated Splash ───────────────────────────────────────────────────────────
@@ -236,22 +237,17 @@ if sys.stderr is None:
 # demucs resolves ffmpeg through PATH *only*, and when it finds none it falls
 # back to torchaudio.load — which on torch 2.9 raises "TorchCodec is required".
 # So a source install with ffmpeg.exe in the project root, exactly as the README
-# instructs, failed on every Demucs separation. Prepending the app directory
-# covers the frozen bundle (_MEIPASS) and the source checkout alike.
-_app_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-os.environ["PATH"] = _app_dir + os.pathsep + os.environ.get("PATH", "")
+# instructs, failed on every Demucs separation. Prepending bundle_dir() covers
+# the frozen build and the source checkout alike. In the one-dir build that is
+# the _internal folder, NOT the folder holding Rend.exe — ffmpeg.exe lives in
+# _internal, so prepending dirname(sys.executable) would find nothing.
+os.environ["PATH"] = paths.bundle_dir() + os.pathsep + os.environ.get("PATH", "")
 
 # Force Dark Mode and Blue Theme
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base_path, relative_path)
+resource_path = paths.resource_path   # bundled file → absolute path (see paths.py)
 
 
 def ui_font():
@@ -661,7 +657,7 @@ class App(ctk.CTk):
             return  # diagnostics still running
         if self._ffmpeg_ok:
             messagebox.showinfo("FFmpeg", "FFmpeg is installed and working correctly.")
-        elif getattr(sys, 'frozen', False):
+        elif paths.is_frozen():
             messagebox.showwarning(
                 "FFmpeg Not Found",
                 "FFmpeg could not be found inside the app bundle.\n\n"

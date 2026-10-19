@@ -10,7 +10,6 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -22,6 +21,7 @@ import soundfile as sf
 
 import config
 import downloader
+import paths
 import registry
 
 LOG_FILE = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), config.APP_NAME, "error.log")
@@ -127,17 +127,17 @@ def save_stems(separated, output_folder, samplerate, fmt="wav"):
 def ffmpeg_exe():
     """Return the ffmpeg executable to invoke.
 
-    PATH first, then the copy shipped alongside the app — the PyInstaller bundle
-    dir when frozen, or the project root for source installs (where the README
-    tells users to drop ffmpeg.exe). Windows does not search the working
-    directory for executables, so the explicit fallback is what makes a source
-    install work at all.
+    PATH first, then the copy shipped alongside the app — paths.bundle_dir():
+    the one-dir build's _internal folder when frozen, or the project root for
+    source installs (where the README tells users to drop ffmpeg.exe). Windows
+    does not search the working directory for executables, so the explicit
+    fallback is what makes a source install work at all. (app.py also prepends
+    bundle_dir() to PATH, so in practice the PATH hit is the bundled copy.)
     """
     found = shutil.which("ffmpeg")
     if found:
         return found
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    local = os.path.join(base, "ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    local = paths.resource_path("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
     return local if os.path.exists(local) else "ffmpeg"
 
 
